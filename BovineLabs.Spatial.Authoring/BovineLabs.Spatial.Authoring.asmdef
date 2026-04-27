@@ -11,7 +11,10 @@
     "Unity.Burst",
     "Unity.Collections",
     "Unity.Entities",
-    "Unity.Mathematics"
+    "Unity.Mathematics",
+    "Unity.Transforms.Hybrid",
+    "Unity.Transforms",
+    "Unity.Entities.Hybrid"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

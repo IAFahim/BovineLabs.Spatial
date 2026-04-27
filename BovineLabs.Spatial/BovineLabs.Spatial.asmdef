@@ -6,10 +6,13 @@
     "BovineLabs.Core.Extensions",
     "BovineLabs.Spatial.Data",
     "Unity.Burst",
+    "Unity.Entities.Hybrid",
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Mathematics",
-    "Unity.Transforms"
+    "Unity.Transforms",
+    "BovineLabs.Bridge.Data",
+    "BovineLabs.Core.Authoring"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

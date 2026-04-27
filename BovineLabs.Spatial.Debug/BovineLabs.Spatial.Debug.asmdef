@@ -3,8 +3,10 @@
   "rootNamespace": "",
   "references": [
     "BovineLabs.Core",
+    "BovineLabs.Quill",
     "BovineLabs.Spatial",
     "BovineLabs.Spatial.Data",
+    "BovineLabs.Bridge.Data",
     "Unity.Burst",
     "Unity.Collections",
     "Unity.Entities",
