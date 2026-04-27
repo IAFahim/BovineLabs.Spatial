@@ -12,7 +12,7 @@ namespace BovineLabs.Spatial.Authoring
         {
             public override void Bake(NeighborTrackerAuthoring authoring)
             {
-                var entity = this.GetEntity(TransformUsageFlags.Dynamic);
+                var entity = this.GetEntity(TransformUsageFlags.None);
                 this.AddComponent(entity, new NeighborTracker { Range = authoring.Range });
                 this.AddBuffer<Neighbor>(entity);
             }

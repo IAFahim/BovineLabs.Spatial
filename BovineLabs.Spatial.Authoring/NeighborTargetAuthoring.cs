@@ -4,13 +4,14 @@ using UnityEngine;
 
 namespace BovineLabs.Spatial.Authoring
 {
+    [RequireComponent(typeof(TransformAuthoring))]
     public class NeighborTargetAuthoring : MonoBehaviour
     {
         public class TargetBaker : Baker<NeighborTargetAuthoring>
         {
             public override void Bake(NeighborTargetAuthoring authoring)
             {
-                var entity = this.GetEntity(TransformUsageFlags.Dynamic);
+                var entity = this.GetEntity(TransformUsageFlags.None);
                 this.AddComponent(entity, new NeighborTarget());
             }
         }
