@@ -11,7 +11,7 @@ namespace BovineLabs.Spatial.Authoring
         {
             public override void Bake(NeighborTargetAuthoring authoring)
             {
-                var entity = this.GetEntity(TransformUsageFlags.None);
+                var entity = this.GetEntity(TransformUsageFlags.Dynamic);
                 this.AddComponent(entity, new NeighborTarget());
             }
         }

@@ -32,6 +32,8 @@ namespace BovineLabs.Spatial.Debug
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            // intnetoally retuned for now
+            return;
             this.transformLookup.Update(ref state);
             var config = SystemAPI.GetSingleton<SpatialGridConfig>();
             var camLtw = this.cameraQuery.GetSingleton<LocalTransform>();
