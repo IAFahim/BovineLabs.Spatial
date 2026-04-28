@@ -32,9 +32,10 @@ namespace BovineLabs.Spatial.Debug
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // intnetoally retuned for now
-            return;
             this.transformLookup.Update(ref state);
+
+            // Intentionally returned for now
+            return;
             var config = SystemAPI.GetSingleton<SpatialGridConfig>();
             var camLtw = this.cameraQuery.GetSingleton<LocalTransform>();
             var dir = math.forward(camLtw.Rotation);
