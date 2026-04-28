@@ -22,20 +22,21 @@ namespace BovineLabs.Spatial.Systems
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            this.trackers = SystemAPI.QueryBuilder().WithAll<NeighborTracker, LocalTransform>().WithAllRW<Neighbor>().Build();
-            this.targets = SystemAPI.QueryBuilder().WithAll<NeighborTarget, LocalTransform>().Build();
-            this.camera = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalTransform>().Build();
+            trackers = SystemAPI.QueryBuilder().WithAll<NeighborTracker, LocalTransform>().WithAllRW<Neighbor>()
+                .Build();
+            targets = SystemAPI.QueryBuilder().WithAll<NeighborTarget, LocalTransform>().Build();
+            camera = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalTransform>().Build();
 
             state.RequireForUpdate<SpatialGridConfig>();
-            state.RequireForUpdate(this.trackers);
-            state.RequireForUpdate(this.camera);
+            state.RequireForUpdate(trackers);
+            state.RequireForUpdate(camera);
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             var config = SystemAPI.GetSingleton<SpatialGridConfig>();
-            var camLtw = this.camera.GetSingleton<LocalTransform>();
+            var camLtw = camera.GetSingleton<LocalTransform>();
             var dir = math.forward(camLtw.Rotation);
             var centerPosition = camLtw.Position;
             if (math.abs(dir.y) > 0.001f)
@@ -48,26 +49,27 @@ namespace BovineLabs.Spatial.Systems
                 centerPosition += dir * config.CameraOffset;
             }
 
-            var targetCount = this.targets.CalculateEntityCount();
+            var targetCount = targets.CalculateEntityCount();
             var positions = new NativeList<SpatialEntityPosition>(targetCount, state.WorldUpdateAllocator);
 
             state.Dependency = new GatherTargetsJob
             {
                 CameraPosition = centerPosition,
-                MaxDistanceSq = (config.ActiveMapSize * 0.5f) * (config.ActiveMapSize * 0.5f),
+                MaxDistanceSq = config.ActiveMapSize * 0.5f * (config.ActiveMapSize * 0.5f),
                 TransformHandle = SystemAPI.GetComponentTypeHandle<LocalTransform>(true),
                 EntityHandle = SystemAPI.GetEntityTypeHandle(),
                 Positions = positions.AsParallelWriter()
-            }.ScheduleParallel(this.targets, state.Dependency);
+            }.ScheduleParallel(targets, state.Dependency);
 
-            var map = new SpatialMap<SpatialEntityPosition>(config.CellSize, config.ActiveMapSize, state.WorldUpdateAllocator);
+            var map = new SpatialMap<SpatialEntityPosition>(config.CellSize, config.ActiveMapSize,
+                state.WorldUpdateAllocator);
             state.Dependency = map.Build(positions, state.Dependency);
 
             state.Dependency = new FindNeighborsJob
             {
                 Map = map.AsReadOnly(),
                 Targets = positions.AsDeferredJobArray()
-            }.ScheduleParallel(this.trackers, state.Dependency);
+            }.ScheduleParallel(trackers, state.Dependency);
         }
 
         [BurstCompile]
@@ -79,21 +81,20 @@ namespace BovineLabs.Spatial.Systems
             [ReadOnly] public EntityTypeHandle EntityHandle;
             public NativeList<SpatialEntityPosition>.ParallelWriter Positions;
 
-            public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
+            public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask,
+                in v128 chunkEnabledMask)
             {
-                var transforms = chunk.GetNativeArray(ref this.TransformHandle);
-                var entities = chunk.GetNativeArray(this.EntityHandle);
+                var transforms = chunk.GetNativeArray(ref TransformHandle);
+                var entities = chunk.GetNativeArray(EntityHandle);
 
                 for (var i = 0; i < chunk.Count; i++)
-                {
-                    if (TryGetTargetWithinCameraBounds(transforms[i].Position, this.CameraPosition, this.MaxDistanceSq, entities[i], out var position))
-                    {
-                        this.Positions.AddNoResize(position);
-                    }
-                }
+                    if (TryGetTargetWithinCameraBounds(transforms[i].Position, CameraPosition, MaxDistanceSq,
+                            entities[i], out var position))
+                        Positions.AddNoResize(position);
             }
 
-            private static bool TryGetTargetWithinCameraBounds(float3 targetPos, float3 cameraPos, float maxDistanceSq, Entity entity, out SpatialEntityPosition position)
+            private static bool TryGetTargetWithinCameraBounds(float3 targetPos, float3 cameraPos, float maxDistanceSq,
+                Entity entity, out SpatialEntityPosition position)
             {
                 position = default;
                 if (math.distancesq(targetPos.xz, cameraPos.xz) <= maxDistanceSq)
@@ -112,46 +113,39 @@ namespace BovineLabs.Spatial.Systems
             [ReadOnly] public SpatialMap.ReadOnly Map;
             [ReadOnly] public NativeArray<SpatialEntityPosition> Targets;
 
-            private void Execute(Entity entity, ref DynamicBuffer<Neighbor> neighbors, in NeighborTracker tracker, in LocalTransform transform)
+            private void Execute(Entity entity, ref DynamicBuffer<Neighbor> neighbors, in NeighborTracker tracker,
+                in LocalTransform transform)
             {
                 neighbors.Clear();
-                TryGetNeighbors(in this.Map, this.Targets, transform.Position.xz, tracker.Range, entity, ref neighbors);
+                TryGetNeighbors(in Map, Targets, transform.Position.xz, tracker.Range, entity, ref neighbors);
             }
 
-            private static bool TryGetNeighbors(in SpatialMap.ReadOnly map, in NativeArray<SpatialEntityPosition> targets, float2 center, float range, Entity self, ref DynamicBuffer<Neighbor> neighbors)
+            private static bool TryGetNeighbors(in SpatialMap.ReadOnly map,
+                in NativeArray<SpatialEntityPosition> targets, float2 center, float range, Entity self,
+                ref DynamicBuffer<Neighbor> neighbors)
             {
                 var rangeSq = range * range;
                 var min = map.Quantized(center - new float2(range));
                 var max = map.Quantized(center + new float2(range));
 
                 for (var y = min.y; y <= max.y; y++)
+                for (var x = min.x; x <= max.x; x++)
                 {
-                    for (var x = min.x; x <= max.x; x++)
-                    {
-                        var hash = map.Hash(new int2(x, y));
-                        if (map.Map.TryGetFirstValue(hash, out var targetIndex, out var it))
+                    var hash = map.Hash(new int2(x, y));
+                    if (map.Map.TryGetFirstValue(hash, out var targetIndex, out var it))
+                        do
                         {
-                            do
-                            {
-                                var target = targets[targetIndex];
-                                if (target.Entity == self)
-                                {
-                                    continue;
-                                }
+                            var target = targets[targetIndex];
+                            if (target.Entity == self) continue;
 
-                                var distSq = math.distancesq(center, target.WorldPosition.xz);
-                                if (distSq <= rangeSq)
+                            var distSq = math.distancesq(center, target.WorldPosition.xz);
+                            if (distSq <= rangeSq)
+                                neighbors.Add(new Neighbor
                                 {
-                                    neighbors.Add(new Neighbor
-                                    {
-                                        Entity = target.Entity,
-                                        DistanceSq = distSq
-                                    });
-                                }
-                            }
-                            while (map.Map.TryGetNextValue(out targetIndex, ref it));
-                        }
-                    }
+                                    Entity = target.Entity,
+                                    DistanceSq = distSq
+                                });
+                        } while (map.Map.TryGetNextValue(out targetIndex, ref it));
                 }
 
                 return !neighbors.IsEmpty;

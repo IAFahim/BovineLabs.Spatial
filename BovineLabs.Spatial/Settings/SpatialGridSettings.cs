@@ -18,9 +18,9 @@ namespace BovineLabs.Spatial.Settings
             var entity = baker.GetEntity(TransformUsageFlags.None);
             baker.AddComponent(entity, new SpatialGridConfig
             {
-                CellSize = this.cellSize,
-                ActiveMapSize = this.activeMapSize,
-                CameraOffset = this.cameraOffset
+                CellSize = cellSize,
+                ActiveMapSize = activeMapSize,
+                CameraOffset = cameraOffset
             });
         }
     }

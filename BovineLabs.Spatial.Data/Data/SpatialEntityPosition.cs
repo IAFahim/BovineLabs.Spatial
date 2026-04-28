@@ -9,6 +9,6 @@ namespace BovineLabs.Spatial.Data
         public Entity Entity;
         public float3 WorldPosition;
 
-        float2 ISpatialPosition.Position => this.WorldPosition.xz;
+        float2 ISpatialPosition.Position => WorldPosition.xz;
     }
 }
