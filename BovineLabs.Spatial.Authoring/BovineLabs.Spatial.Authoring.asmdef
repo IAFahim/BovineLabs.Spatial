@@ -14,7 +14,8 @@
     "Unity.Mathematics",
     "Unity.Transforms.Hybrid",
     "Unity.Transforms",
-    "Unity.Entities.Hybrid"
+    "Unity.Entities.Hybrid",
+    "BovineLabs.Bridge.Data"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

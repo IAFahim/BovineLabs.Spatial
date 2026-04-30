@@ -11,8 +11,7 @@
     "Unity.Entities",
     "Unity.Mathematics",
     "Unity.Transforms",
-    "BovineLabs.Bridge.Data",
-    "BovineLabs.Core.Authoring"
+    "BovineLabs.Bridge.Data"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
