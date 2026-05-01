@@ -35,6 +35,8 @@ namespace BovineLabs.Spatial.Systems
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            state.Dependency.Complete();
+
             var config = SystemAPI.GetSingleton<SpatialGridConfig>();
             var camLtw = camera.GetSingleton<LocalTransform>();
             var dir = math.forward(camLtw.Rotation);
