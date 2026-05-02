@@ -3,6 +3,7 @@ using BovineLabs.Core.Authoring.Settings;
 using BovineLabs.Core.Settings;
 using BovineLabs.Spatial.Authoring;
 using BovineLabs.Spatial.Data;
+using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
 
@@ -12,33 +13,89 @@ namespace BovineLabs.Spatial.Settings
     public sealed class SpatialGridSettings : SettingsBase
     {
         [Header("Grid")]
-        [SerializeField] private float cellSize = 2f;
+        [SerializeField] private float cellSize = 0.5f;
         [SerializeField] private int activeMapSize = 100;
-        [SerializeField] private float cameraOffset = 20f;
 
         [Header("Mask Schemas")]
         [SerializeField] private List<SpatialMaskAsset> schemas = new();
 
         public float CellSize => cellSize;
         public int ActiveMapSize => activeMapSize;
-        public float CameraOffset => cameraOffset;
 
         public IReadOnlyList<SpatialMaskAsset> Schemas => schemas;
 
         public override void Bake(Baker<SettingsAuthoring> baker)
         {
             var entity = baker.GetEntity(TransformUsageFlags.None);
-
-            baker.AddComponent(entity, new SpatialGridConfig
+            var blob = CreateMaskDatabaseBlob();
+            baker.AddBlobAsset(ref blob, out _);
+            baker.AddComponent(entity, new SpatialMaskDatabase { Blob = blob });
+            baker.AddComponent(entity, new SpatialFocusedMap
             {
                 CellSize = cellSize,
-                ActiveMapSize = activeMapSize,
-                CameraOffset = cameraOffset
+                Size = activeMapSize,
             });
+            baker.AddBuffer<SpatialNeighbors>(entity);
+        }
 
-            // Later:
-            // Bake SpatialMaskAsset list into SpatialMaskDatabase blob here.
-            // Key should be mask.Id.
+        private BlobAssetReference<SpatialMaskDatabaseBlob> CreateMaskDatabaseBlob()
+        {
+            var masks = ValidMasks();
+            var builder = new BlobBuilder(Allocator.Temp);
+            ref var root = ref builder.ConstructRoot<SpatialMaskDatabaseBlob>();
+            var entries = builder.Allocate(ref root.Masks, MaskArrayLength(masks));
+
+            for (var i = 0; i < masks.Count; i++)
+            {
+                var mask = masks[i];
+                var values = builder.Allocate(ref entries[mask.Id].Values, mask.Width * mask.Height);
+
+                var index = 0;
+                for (var y = 0; y < mask.Height; y++)
+                for (var x = 0; x < mask.Width; x++)
+                    values[index++] = mask.Get(x, y);
+            }
+
+            var blob = builder.CreateBlobAssetReference<SpatialMaskDatabaseBlob>(Allocator.Persistent);
+            builder.Dispose();
+            return blob;
+        }
+
+        private List<SpatialMaskAsset> ValidMasks()
+        {
+            var result = new List<SpatialMaskAsset>();
+            var keys = new HashSet<ushort>();
+
+            foreach (var mask in schemas)
+            {
+                if (mask == null || mask.Id == 0)
+                    continue;
+
+                if (mask.Width != mask.Height || (mask.Width & 1) == 0)
+                {
+                    Debug.LogError($"Spatial mask {mask.name} must be odd square.", mask);
+                    continue;
+                }
+
+                if (!keys.Add(mask.Id))
+                {
+                    Debug.LogError($"Duplicate spatial mask key {mask.Id} on {mask.name}.", mask);
+                    continue;
+                }
+
+                result.Add(mask);
+            }
+
+            return result;
+        }
+
+        private static int MaskArrayLength(List<SpatialMaskAsset> masks)
+        {
+            var length = 0;
+            for (var i = 0; i < masks.Count; i++)
+                length = Mathf.Max(length, masks[i].Id + 1);
+
+            return length;
         }
 
         public static bool TryGetKey(SpatialMaskAsset mask, out ushort key)

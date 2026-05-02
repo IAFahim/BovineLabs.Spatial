@@ -9,7 +9,10 @@
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Mathematics",
-    "Unity.Transforms"
+    "Unity.Transforms",
+    "BovineLabs.Essence.Data",
+    "BovineLabs.Reaction",
+    "BovineLabs.Reaction.Data"
   ],
   "optionalUnityReferences": [],
   "includePlatforms": [],

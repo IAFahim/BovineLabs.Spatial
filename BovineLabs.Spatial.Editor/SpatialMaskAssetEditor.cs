@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System;
+using System.Collections.Generic;
 using BovineLabs.Spatial.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -10,62 +11,69 @@ namespace BovineLabs.Spatial.Authoring.Editor
     public sealed class SpatialMaskAssetEditor : UnityEditor.Editor
     {
         private const float CellGap = 1f;
-        private const int CellMin = 16;
-        private const int CellMax = 28;
+        private const int CellMin = 18;
+        private const int CellMax = 24;
         private const float LabelWidth = 48f;
         private const float Gap = 3f;
+        private const string ClipboardHeader = "SPATIAL_MASK";
 
         private static readonly int[] Sizes = { 1, 3, 5, 7, 9, 11, 15 };
         private static readonly string[] WriteModeNames = Enum.GetNames(typeof(SpatialMaskWriteMode));
         private static readonly string[] SizeNames = { "1x1", "3x3", "5x5", "7x7", "9x9", "11x11", "15x15" };
 
+        private readonly HashSet<int> selection = new();
+        private readonly List<int> orderedSelection = new();
         private SpatialMaskAsset asset;
         private int brush = 1;
-        private int selectedX;
-        private int selectedY;
-        private bool hasSelection;
-        private bool gridOwnsKeyboard;
+        private int anchorX;
+        private int anchorY;
         private Rect gridRect;
+        private Vector2 dataScroll;
+        private bool dataExpanded = true;
         private SpatialMaskShape shape = SpatialMaskShape.ForwardCone;
         private SpatialMaskWriteMode writeMode = SpatialMaskWriteMode.Replace;
 
         private static bool IsDark => EditorGUIUtility.isProSkin;
+        private bool HasSelection => selection.Count != 0;
 
         private void OnEnable()
         {
             asset = (SpatialMaskAsset)target;
-            selectedX = asset.CenterX;
-            selectedY = asset.CenterY;
-            hasSelection = asset.IsInside(selectedX, selectedY);
+            SelectOnly(asset.CenterX, asset.CenterY);
         }
 
         public override void OnInspectorGUI()
         {
             asset = (SpatialMaskAsset)target;
+            serializedObject.Update();
 
-            var evt = Event.current;
-
-            if (evt.type == EventType.MouseDown && !gridRect.Contains(evt.mousePosition))
-                gridOwnsKeyboard = false;
-
+            DrawUnityProperties();
             DrawStatus();
             DrawBrush();
             DrawShape();
-            DrawGrid(evt);
-            DrawEdit();
+            DrawGrid(Event.current);
+            DrawSelectionEdit();
             DrawTransform();
             DrawSize();
+            DrawData();
 
-            if (TryHandleKeyboard(evt))
+            if (TryHandleKeyboard(Event.current))
                 Repaint();
+
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        private void DrawUnityProperties()
+        {
+            var id = serializedObject.FindProperty("id");
+            if (id != null)
+                EditorGUILayout.PropertyField(id);
         }
 
         private void DrawStatus()
         {
             var stats = SpatialMaskStats.From(asset);
-            var value = hasSelection ? asset.Get(selectedX, selectedY) : 0;
-            var selected = hasSelection ? $"Sel ({selectedX},{selectedY}) {FormatOffset(selectedX, selectedY)} = {FormatSigned(value)}" : "Sel none";
-
+            var selected = HasSelection ? $"Sel {selection.Count}  Sum {FormatSigned(SelectionSum())}" : "Sel none";
             EditorGUILayout.LabelField($"{asset.Width}x{asset.Height}  Center ({asset.CenterX},{asset.CenterY})  Active {stats.Active}/{stats.Count}  Sum {FormatSigned(stats.Sum)}  Min {FormatSigned(stats.Min)}  Max {FormatSigned(stats.Max)}", EditorStyles.miniLabel);
             EditorGUILayout.LabelField($"{selected}  Brush {FormatSigned(brush)}  Shape {shape}  {writeMode}", EditorStyles.miniLabel);
         }
@@ -135,18 +143,14 @@ namespace BovineLabs.Spatial.Authoring.Editor
             gridRect.width = width;
             gridRect.height = height;
 
-            for (var y = 0; y < asset.Height; y++)
-            {
-                for (var x = 0; x < asset.Width; x++)
-                {
-                    var rect = new Rect(
-                        gridRect.x + x * (cellSize + CellGap),
-                        gridRect.y + y * (cellSize + CellGap),
-                        cellSize,
-                        cellSize);
+            if (TryHandleGridScroll(evt))
+                return;
 
-                    DrawCell(rect, x, y, evt);
-                }
+            for (var y = 0; y < asset.Height; y++)
+            for (var x = 0; x < asset.Width; x++)
+            {
+                var rect = CellRect(x, y, cellSize);
+                DrawCell(rect, x, y, evt);
             }
         }
 
@@ -155,7 +159,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
             var value = asset.Get(x, y);
             var center = x == asset.CenterX && y == asset.CenterY;
             var axis = x == asset.CenterX || y == asset.CenterY;
-            var selected = hasSelection && x == selectedX && y == selectedY;
+            var selected = IsSelected(x, y);
             var hover = rect.Contains(evt.mousePosition);
             var preview = TryGetShapeWeight(x, y, out var previewValue) && previewValue != 0;
 
@@ -182,34 +186,63 @@ namespace BovineLabs.Spatial.Authoring.Editor
             if (evt.type != EventType.MouseDown || !hover)
                 return;
 
-            gridOwnsKeyboard = true;
-
             if (evt.button == 0)
             {
-                PaintCell(x, y);
+                HandleSelectionClick(x, y, evt);
                 evt.Use();
                 return;
             }
 
             if (evt.button == 1)
             {
-                PickCell(x, y);
+                if (!selected)
+                    SelectOnly(x, y);
+
+                ShowContextMenu(x, y);
                 evt.Use();
             }
         }
 
-        private void DrawEdit()
+        private void DrawSelectionEdit()
         {
-            var row = Row();
-            Label(ref row, "Edit");
+            EditorGUILayout.LabelField("Selection", EditorStyles.boldLabel);
 
-            using (new EditorGUI.DisabledScope(!hasSelection))
+            using (new EditorGUI.DisabledScope(!HasSelection))
             {
-                if (Button(ref row, "Clear Cell", 76f, EditorStyles.miniButtonLeft))
-                    ClearSelectedCell();
+                var row = Row();
+                Label(ref row, "Value");
+
+                EditorGUI.BeginChangeCheck();
+                var value = EditorGUI.IntField(Slice(ref row, 54f), FirstSelectedValue());
+                if (EditorGUI.EndChangeCheck())
+                    SetSelection(value, "Set Spatial Mask Selection");
+
+                if (Button(ref row, "Brush", 48f, EditorStyles.miniButtonLeft))
+                    SetSelection(brush, "Paint Spatial Mask Selection");
+
+                if (Button(ref row, "+", 26f, EditorStyles.miniButtonMid))
+                    AddSelection(1, "Increment Spatial Mask Selection");
+
+                if (Button(ref row, "-", 26f, EditorStyles.miniButtonMid))
+                    AddSelection(-1, "Decrement Spatial Mask Selection");
+
+                if (Button(ref row, "Clear", 44f, EditorStyles.miniButtonMid))
+                    SetSelection(0, "Clear Spatial Mask Selection");
+
+                if (Button(ref row, "Copy", 42f, EditorStyles.miniButtonMid))
+                    CopySelection();
+
+                if (Button(ref row, "Paste", 44f, EditorStyles.miniButtonRight))
+                    PasteFromClipboard();
             }
 
-            if (Button(ref row, "Clear All", 70f, EditorStyles.miniButtonRight))
+            var all = Row();
+            Label(ref all, "All");
+
+            if (Button(ref all, "Select All", 70f, EditorStyles.miniButtonLeft))
+                SelectAll();
+
+            if (Button(ref all, "Clear All", 70f, EditorStyles.miniButtonRight))
                 ApplyChange("Clear Spatial Mask", asset.Clear);
         }
 
@@ -246,36 +279,123 @@ namespace BovineLabs.Spatial.Authoring.Editor
             ApplyChange($"Resize Spatial Mask {size}x{size}", () => asset.ResizeCentered(size, size));
         }
 
+        private void DrawData()
+        {
+            dataExpanded = EditorGUILayout.Foldout(dataExpanded, "Data", true);
+            if (!dataExpanded)
+                return;
+
+            var cellWidth = 42f;
+            var rowHeight = EditorGUIUtility.singleLineHeight + 2f;
+            var totalWidth = LabelWidth + asset.Width * cellWidth + 8f;
+            var totalHeight = (asset.Height + 1) * rowHeight;
+            var viewHeight = Mathf.Min(180f, totalHeight + 4f);
+            var outer = GUILayoutUtility.GetRect(0f, viewHeight, GUILayout.ExpandWidth(true));
+            var view = new Rect(0f, 0f, totalWidth, totalHeight);
+
+            dataScroll = GUI.BeginScrollView(outer, dataScroll, view, false, true);
+
+            var header = new Rect(0f, 0f, LabelWidth, rowHeight);
+            GUI.Label(header, "x/y", EditorStyles.miniBoldLabel);
+
+            for (var x = 0; x < asset.Width; x++)
+            {
+                var rect = new Rect(LabelWidth + x * cellWidth, 0f, cellWidth, rowHeight);
+                GUI.Label(rect, (x - asset.CenterX).ToString(), EditorStyles.centeredGreyMiniLabel);
+            }
+
+            for (var y = 0; y < asset.Height; y++)
+            {
+                var yRect = new Rect(0f, (y + 1) * rowHeight, LabelWidth, rowHeight);
+                GUI.Label(yRect, (asset.CenterY - y).ToString(), EditorStyles.centeredGreyMiniLabel);
+
+                for (var x = 0; x < asset.Width; x++)
+                {
+                    var rect = new Rect(LabelWidth + x * cellWidth, (y + 1) * rowHeight, cellWidth - 2f, rowHeight);
+                    DrawDataCell(rect, x, y);
+                }
+            }
+
+            GUI.EndScrollView();
+        }
+
+        private void DrawDataCell(Rect rect, int x, int y)
+        {
+            if (IsSelected(x, y))
+                EditorGUI.DrawRect(rect, SelectionFill());
+
+            EditorGUI.BeginChangeCheck();
+            var value = EditorGUI.IntField(rect, asset.Get(x, y));
+            if (EditorGUI.EndChangeCheck())
+            {
+                SelectOnly(x, y);
+                SetCell(x, y, value, "Set Spatial Mask Cell");
+            }
+        }
+
         private bool TryHandleKeyboard(Event evt)
         {
-            if (!gridOwnsKeyboard || !hasSelection || evt.type != EventType.KeyDown)
+            if (evt.type != EventType.KeyDown)
+                return false;
+
+            if (evt.control || evt.command)
+            {
+                if (evt.keyCode == KeyCode.C)
+                {
+                    CopySelection();
+                    evt.Use();
+                    return true;
+                }
+
+                if (evt.keyCode == KeyCode.V)
+                {
+                    PasteFromClipboard();
+                    evt.Use();
+                    return true;
+                }
+
+                if (evt.keyCode == KeyCode.A)
+                {
+                    SelectAll();
+                    evt.Use();
+                    return true;
+                }
+            }
+
+            if (!HasSelection)
                 return false;
 
             switch (evt.keyCode)
             {
                 case KeyCode.Delete:
                 case KeyCode.Backspace:
-                    ClearSelectedCell();
+                    SetSelection(0, "Clear Spatial Mask Selection");
+                    evt.Use();
+                    return true;
+
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    SetSelection(brush, "Paint Spatial Mask Selection");
                     evt.Use();
                     return true;
 
                 case KeyCode.LeftArrow:
-                    TrySelect(selectedX - 1, selectedY);
+                    MoveSelection(-1, 0, evt.shift);
                     evt.Use();
                     return true;
 
                 case KeyCode.RightArrow:
-                    TrySelect(selectedX + 1, selectedY);
+                    MoveSelection(1, 0, evt.shift);
                     evt.Use();
                     return true;
 
                 case KeyCode.UpArrow:
-                    TrySelect(selectedX, selectedY - 1);
+                    MoveSelection(0, -1, evt.shift);
                     evt.Use();
                     return true;
 
                 case KeyCode.DownArrow:
-                    TrySelect(selectedX, selectedY + 1);
+                    MoveSelection(0, 1, evt.shift);
                     evt.Use();
                     return true;
 
@@ -284,40 +404,257 @@ namespace BovineLabs.Spatial.Authoring.Editor
             }
         }
 
-        private void PaintCell(int x, int y)
+        private bool TryHandleGridScroll(Event evt)
         {
-            if (!TrySelect(x, y))
-                return;
+            if (evt.type != EventType.ScrollWheel || !gridRect.Contains(evt.mousePosition))
+                return false;
 
-            SetCell(x, y, brush, "Paint Spatial Mask Cell");
+            if (!TryGetCellAt(evt.mousePosition, out var x, out var y))
+                return false;
+
+            var delta = evt.delta.y < 0f ? 1 : -1;
+            if (evt.shift)
+                delta *= 5;
+            if (evt.control || evt.command)
+                delta *= 10;
+
+            if (!IsSelected(x, y))
+                SelectOnly(x, y);
+
+            AddSelection(delta, "Scroll Spatial Mask Selection");
+            evt.Use();
+            return true;
         }
 
-        private void PickCell(int x, int y)
+        private void HandleSelectionClick(int x, int y, Event evt)
         {
-            if (!TrySelect(x, y))
+            if (evt.shift)
+            {
+                SelectRange(anchorX, anchorY, x, y);
                 return;
+            }
 
+            if (evt.control || evt.command)
+            {
+                ToggleSelection(x, y);
+                anchorX = x;
+                anchorY = y;
+                return;
+            }
+
+            SelectOnly(x, y);
+        }
+
+        private void ShowContextMenu(int x, int y)
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("Set Brush"), false, () => SetSelection(brush, "Paint Spatial Mask Selection"));
+            menu.AddItem(new GUIContent("Add Brush"), false, () => AddSelection(brush, "Add Spatial Mask Brush"));
+            menu.AddItem(new GUIContent("Clear"), false, () => SetSelection(0, "Clear Spatial Mask Selection"));
+            menu.AddSeparator(string.Empty);
+            menu.AddItem(new GUIContent("Pick Brush"), false, () => PickBrush(x, y));
+            menu.AddItem(new GUIContent("Copy"), false, CopySelection);
+            menu.AddItem(new GUIContent("Paste"), false, PasteFromClipboard);
+            menu.ShowAsContext();
+        }
+
+        private void PickBrush(int x, int y)
+        {
             brush = asset.Get(x, y);
             Repaint();
         }
 
-        private void ClearSelectedCell()
+        private void CopySelection()
         {
-            if (!hasSelection)
+            if (!HasSelection)
                 return;
 
-            SetCell(selectedX, selectedY, 0, "Clear Spatial Mask Cell");
+            SyncOrderedSelection();
+            var bounds = SelectionBounds();
+            var lines = new List<string>
+            {
+                $"{ClipboardHeader}\t{bounds.width}\t{bounds.height}",
+            };
+
+            for (var i = 0; i < orderedSelection.Count; i++)
+            {
+                Decode(orderedSelection[i], out var x, out var y);
+                lines.Add($"{x - bounds.x}\t{y - bounds.y}\t{asset.Get(x, y)}");
+            }
+
+            EditorGUIUtility.systemCopyBuffer = string.Join("\n", lines);
         }
 
-        private bool TrySelect(int x, int y)
+        private void PasteFromClipboard()
+        {
+            var text = EditorGUIUtility.systemCopyBuffer;
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            if (int.TryParse(text.Trim(), out var scalar))
+            {
+                SetSelection(scalar, "Paste Spatial Mask Value");
+                return;
+            }
+
+            var lines = text.Replace("\r", string.Empty).Split('\n');
+            if (lines.Length == 0 || !lines[0].StartsWith(ClipboardHeader, StringComparison.Ordinal))
+                return;
+
+            var anchor = HasSelection ? SelectionBounds() : new RectInt(asset.CenterX, asset.CenterY, 1, 1);
+            Undo.RecordObject(asset, "Paste Spatial Mask Values");
+            selection.Clear();
+
+            for (var i = 1; i < lines.Length; i++)
+            {
+                var parts = lines[i].Split('\t');
+                if (parts.Length < 3)
+                    continue;
+
+                if (!int.TryParse(parts[0], out var rx) || !int.TryParse(parts[1], out var ry) || !int.TryParse(parts[2], out var value))
+                    continue;
+
+                var x = anchor.x + rx;
+                var y = anchor.y + ry;
+                if (!asset.IsInside(x, y))
+                    continue;
+
+                asset.Set(x, y, ClampToSByte(value));
+                selection.Add(Key(x, y));
+                anchorX = x;
+                anchorY = y;
+            }
+
+            EditorUtility.SetDirty(asset);
+            Repaint();
+        }
+
+        private void MoveSelection(int dx, int dy, bool extend)
+        {
+            var bounds = SelectionBounds();
+            var x = Mathf.Clamp(bounds.x + dx, 0, asset.Width - 1);
+            var y = Mathf.Clamp(bounds.y + dy, 0, asset.Height - 1);
+
+            if (extend)
+                SelectRange(anchorX, anchorY, x, y);
+            else
+                SelectOnly(x, y);
+        }
+
+        private void SelectOnly(int x, int y)
         {
             if (!asset.IsInside(x, y))
-                return false;
+                return;
 
-            selectedX = x;
-            selectedY = y;
-            hasSelection = true;
-            return true;
+            selection.Clear();
+            selection.Add(Key(x, y));
+            anchorX = x;
+            anchorY = y;
+        }
+
+        private void SelectAll()
+        {
+            selection.Clear();
+            for (var y = 0; y < asset.Height; y++)
+            for (var x = 0; x < asset.Width; x++)
+                selection.Add(Key(x, y));
+
+            anchorX = 0;
+            anchorY = 0;
+        }
+
+        private void SelectRange(int ax, int ay, int bx, int by)
+        {
+            selection.Clear();
+
+            var minX = Mathf.Min(ax, bx);
+            var maxX = Mathf.Max(ax, bx);
+            var minY = Mathf.Min(ay, by);
+            var maxY = Mathf.Max(ay, by);
+
+            for (var y = minY; y <= maxY; y++)
+            for (var x = minX; x <= maxX; x++)
+            {
+                if (asset.IsInside(x, y))
+                    selection.Add(Key(x, y));
+            }
+        }
+
+        private void ToggleSelection(int x, int y)
+        {
+            var key = Key(x, y);
+            if (!selection.Remove(key))
+                selection.Add(key);
+        }
+
+        private bool IsSelected(int x, int y)
+        {
+            return selection.Contains(Key(x, y));
+        }
+
+        private int FirstSelectedValue()
+        {
+            if (!TryGetFirstSelected(out var x, out var y))
+                return 0;
+
+            return asset.Get(x, y);
+        }
+
+        private int SelectionSum()
+        {
+            var sum = 0;
+            foreach (var key in selection)
+            {
+                Decode(key, out var x, out var y);
+                sum += asset.Get(x, y);
+            }
+
+            return sum;
+        }
+
+        private bool TryGetFirstSelected(out int x, out int y)
+        {
+            foreach (var key in selection)
+            {
+                Decode(key, out x, out y);
+                return true;
+            }
+
+            x = 0;
+            y = 0;
+            return false;
+        }
+
+        private void SetSelection(int value, string undoName)
+        {
+            if (!HasSelection)
+                return;
+
+            Undo.RecordObject(asset, undoName);
+            foreach (var key in selection)
+            {
+                Decode(key, out var x, out var y);
+                asset.Set(x, y, ClampToSByte(value));
+            }
+
+            EditorUtility.SetDirty(asset);
+            Repaint();
+        }
+
+        private void AddSelection(int delta, string undoName)
+        {
+            if (!HasSelection)
+                return;
+
+            Undo.RecordObject(asset, undoName);
+            foreach (var key in selection)
+            {
+                Decode(key, out var x, out var y);
+                asset.Add(x, y, delta);
+            }
+
+            EditorUtility.SetDirty(asset);
+            Repaint();
         }
 
         private void SetCell(int x, int y, int value, string undoName)
@@ -339,17 +676,15 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 asset.Clear();
 
             for (var y = 0; y < asset.Height; y++)
+            for (var x = 0; x < asset.Width; x++)
             {
-                for (var x = 0; x < asset.Width; x++)
-                {
-                    if (!TryGetShapeWeight(x, y, out var weight) || weight == 0)
-                        continue;
+                if (!TryGetShapeWeight(x, y, out var weight) || weight == 0)
+                    continue;
 
-                    if (writeMode == SpatialMaskWriteMode.Add)
-                        asset.Add(x, y, weight);
-                    else
-                        asset.Set(x, y, ClampToSByte(weight));
-                }
+                if (writeMode == SpatialMaskWriteMode.Add)
+                    asset.Add(x, y, weight);
+                else
+                    asset.Set(x, y, ClampToSByte(weight));
             }
 
             EditorUtility.SetDirty(asset);
@@ -360,11 +695,28 @@ namespace BovineLabs.Spatial.Authoring.Editor
         {
             Undo.RecordObject(asset, undoName);
             change.Invoke();
-            selectedX = Mathf.Clamp(selectedX, 0, Mathf.Max(0, asset.Width - 1));
-            selectedY = Mathf.Clamp(selectedY, 0, Mathf.Max(0, asset.Height - 1));
-            hasSelection = asset.IsInside(selectedX, selectedY);
+            ClampSelectionToAsset();
             EditorUtility.SetDirty(asset);
             Repaint();
+        }
+
+        private void ClampSelectionToAsset()
+        {
+            orderedSelection.Clear();
+            foreach (var key in selection)
+            {
+                Decode(key, out var x, out var y);
+                x = Mathf.Clamp(x, 0, Mathf.Max(0, asset.Width - 1));
+                y = Mathf.Clamp(y, 0, Mathf.Max(0, asset.Height - 1));
+                orderedSelection.Add(Key(x, y));
+            }
+
+            selection.Clear();
+            for (var i = 0; i < orderedSelection.Count; i++)
+                selection.Add(orderedSelection[i]);
+
+            if (!HasSelection)
+                SelectOnly(asset.CenterX, asset.CenterY);
         }
 
         private bool TryGetShapeWeight(int x, int y, out int weight)
@@ -378,6 +730,52 @@ namespace BovineLabs.Spatial.Authoring.Editor
             var radius = Mathf.Min(asset.Width, asset.Height) / 2;
             weight = ShapeWeight(shape, offset.x, offset.y, radius, brush);
             return true;
+        }
+
+        private bool TryGetCellAt(Vector2 point, out int x, out int y)
+        {
+            var cellSize = CellSize();
+            x = Mathf.FloorToInt((point.x - gridRect.x) / (cellSize + CellGap));
+            y = Mathf.FloorToInt((point.y - gridRect.y) / (cellSize + CellGap));
+            return asset.IsInside(x, y) && CellRect(x, y, cellSize).Contains(point);
+        }
+
+        private Rect CellRect(int x, int y, int cellSize)
+        {
+            return new Rect(
+                gridRect.x + x * (cellSize + CellGap),
+                gridRect.y + y * (cellSize + CellGap),
+                cellSize,
+                cellSize);
+        }
+
+        private RectInt SelectionBounds()
+        {
+            if (!TryGetFirstSelected(out var firstX, out var firstY))
+                return new RectInt(asset.CenterX, asset.CenterY, 1, 1);
+
+            var minX = firstX;
+            var maxX = firstX;
+            var minY = firstY;
+            var maxY = firstY;
+
+            foreach (var key in selection)
+            {
+                Decode(key, out var x, out var y);
+                minX = Mathf.Min(minX, x);
+                maxX = Mathf.Max(maxX, x);
+                minY = Mathf.Min(minY, y);
+                maxY = Mathf.Max(maxY, y);
+            }
+
+            return new RectInt(minX, minY, maxX - minX + 1, maxY - minY + 1);
+        }
+
+        private void SyncOrderedSelection()
+        {
+            orderedSelection.Clear();
+            orderedSelection.AddRange(selection);
+            orderedSelection.Sort();
         }
 
         private static int ShapeWeight(SpatialMaskShape shape, int dx, int dz, int radius, int baseValue)
@@ -487,12 +885,6 @@ namespace BovineLabs.Spatial.Authoring.Editor
             return style;
         }
 
-        private string FormatOffset(int x, int y)
-        {
-            var offset = asset.GetOffset(x, y);
-            return $"({FormatSigned(offset.x)},{FormatSigned(offset.y)})";
-        }
-
         private static string FormatSigned(int value)
         {
             return value > 0 ? $"+{value}" : value.ToString();
@@ -501,6 +893,17 @@ namespace BovineLabs.Spatial.Authoring.Editor
         private static sbyte ClampToSByte(int value)
         {
             return (sbyte)Mathf.Clamp(value, sbyte.MinValue, sbyte.MaxValue);
+        }
+
+        private static int Key(int x, int y)
+        {
+            return x + y * 256;
+        }
+
+        private static void Decode(int key, out int x, out int y)
+        {
+            x = key & 255;
+            y = key >> 8;
         }
 
         private static void DrawCenter(Rect rect)
@@ -573,6 +976,11 @@ namespace BovineLabs.Spatial.Authoring.Editor
             return IsDark ? Color.white : Color.black;
         }
 
+        private static Color SelectionFill()
+        {
+            return IsDark ? new Color(0.22f, 0.32f, 0.48f, 0.55f) : new Color(0.55f, 0.72f, 1f, 0.45f);
+        }
+
         private static Color PreviewBorder()
         {
             return IsDark ? Color.gray6 : Color.gray4;
@@ -621,26 +1029,24 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 var initialized = false;
 
                 for (var y = 0; y < asset.Height; y++)
+                for (var x = 0; x < asset.Width; x++)
                 {
-                    for (var x = 0; x < asset.Width; x++)
+                    var value = asset.Get(x, y);
+                    sum += value;
+
+                    if (value != 0)
+                        active++;
+
+                    if (!initialized)
                     {
-                        var value = asset.Get(x, y);
-                        sum += value;
-
-                        if (value != 0)
-                            active++;
-
-                        if (!initialized)
-                        {
-                            min = value;
-                            max = value;
-                            initialized = true;
-                            continue;
-                        }
-
-                        min = Mathf.Min(min, value);
-                        max = Mathf.Max(max, value);
+                        min = value;
+                        max = value;
+                        initialized = true;
+                        continue;
                     }
+
+                    min = Mathf.Min(min, value);
+                    max = Mathf.Max(max, value);
                 }
 
                 return new SpatialMaskStats(count, active, sum, min, max);
