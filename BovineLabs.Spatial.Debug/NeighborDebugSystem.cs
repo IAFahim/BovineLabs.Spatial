@@ -28,15 +28,18 @@ namespace BovineLabs.Spatial.Debug
         {
             cameraQuery = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalTransform>().Build();
             transformLookup = state.GetUnsafeComponentLookup<LocalTransform>(true);
+            
+            state.RequireForUpdate<SpatialGridConfig>();
+            state.RequireForUpdate<DrawSystem.Singleton>();
+            state.RequireForUpdate(cameraQuery);
         }
+        
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             transformLookup.Update(ref state);
 
-            // Intentionally returned for now
-            return;
             var config = SystemAPI.GetSingleton<SpatialGridConfig>();
             var camLtw = cameraQuery.GetSingleton<LocalTransform>();
             var dir = math.forward(camLtw.Rotation);
@@ -65,13 +68,13 @@ namespace BovineLabs.Spatial.Debug
             {
                 Renderer = renderer,
                 CellSize = config.CellSize
-            }.Schedule(state.Dependency);
+            }.ScheduleParallel(state.Dependency);
 
             state.Dependency = new TrackerDebugJob
             {
                 Renderer = renderer,
                 TransformLookup = transformLookup
-            }.Schedule(state.Dependency);
+            }.ScheduleParallel(state.Dependency);
         }
 
         [BurstCompile]

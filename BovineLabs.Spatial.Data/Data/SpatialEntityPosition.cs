@@ -8,7 +8,8 @@ namespace BovineLabs.Spatial.Data
     {
         public Entity Entity;
         public float3 WorldPosition;
+        public float2 MapPosition;
 
-        float2 ISpatialPosition.Position => WorldPosition.xz;
+        float2 ISpatialPosition.Position => MapPosition;
     }
 }
