@@ -3,560 +3,381 @@ using System;
 using BovineLabs.Spatial.Authoring;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.UIElements;
 
 namespace BovineLabs.Spatial.Authoring.Editor
 {
     [CustomEditor(typeof(SpatialMaskAsset))]
     public sealed class SpatialMaskAssetEditor : UnityEditor.Editor
     {
-        private const int CellSize = 34;
-        private const int CellGap = 3;
-        private const int PreviewSize = 5;
-        private const int PreviewCellSize = 7;
-        private const int PreviewGap = 2;
+        private const float CellGap = 1f;
+        private const int CellMin = 16;
+        private const int CellMax = 28;
+        private const float LabelWidth = 48f;
+        private const float Gap = 3f;
+
+        private static readonly int[] Sizes = { 1, 3, 5, 7, 9, 11, 15 };
+        private static readonly string[] WriteModeNames = Enum.GetNames(typeof(SpatialMaskWriteMode));
+        private static readonly string[] SizeNames = { "1x1", "3x3", "5x5", "7x7", "9x9", "11x11", "15x15" };
 
         private SpatialMaskAsset asset;
+        private int brush = 1;
+        private int selectedX;
+        private int selectedY;
+        private bool hasSelection;
+        private bool gridOwnsKeyboard;
+        private Rect gridRect;
+        private SpatialMaskShape shape = SpatialMaskShape.ForwardCone;
+        private SpatialMaskWriteMode writeMode = SpatialMaskWriteMode.Replace;
 
-        private VisualElement root;
-        private VisualElement gridRoot;
-        private Label summaryLabel;
-        private Label selectedLabel;
-        private Label selectedHintLabel;
-        private IntegerField selectedValueField;
-
-        private Button replaceModeButton;
-        private Button addModeButton;
-
-        private int selectedValue = 1;
-        private bool replaceShape = true;
-
-        private bool IsDark => EditorGUIUtility.isProSkin;
+        private static bool IsDark => EditorGUIUtility.isProSkin;
 
         private void OnEnable()
         {
             asset = (SpatialMaskAsset)target;
+            selectedX = asset.CenterX;
+            selectedY = asset.CenterY;
+            hasSelection = asset.IsInside(selectedX, selectedY);
         }
 
-        public override VisualElement CreateInspectorGUI()
+        public override void OnInspectorGUI()
         {
             asset = (SpatialMaskAsset)target;
 
-            root = new VisualElement();
-            root.style.paddingTop = 10;
-            root.style.paddingBottom = 12;
-            root.style.paddingLeft = 10;
-            root.style.paddingRight = 10;
-            root.style.backgroundColor = RootBackground();
-            root.style.color = Text();
+            var evt = Event.current;
 
-            root.Add(CreateHeader());
-            root.Add(CreateBrushCard());
-            root.Add(CreateCanvasCard());
-            root.Add(CreateShapeCard());
-            root.Add(CreateOperationsCard());
-            root.Add(CreateFooter());
+            if (evt.type == EventType.MouseDown && !gridRect.Contains(evt.mousePosition))
+                gridOwnsKeyboard = false;
 
-            RebuildGrid();
-            UpdateSelectedLabel();
-            UpdateShapeModeButtons();
+            DrawStatus();
+            DrawBrush();
+            DrawShape();
+            DrawGrid(evt);
+            DrawEdit();
+            DrawTransform();
+            DrawSize();
 
-            return root;
+            if (TryHandleKeyboard(evt))
+                Repaint();
         }
 
-        private VisualElement CreateHeader()
+        private void DrawStatus()
         {
-            var card = CreateCard();
+            var stats = SpatialMaskStats.From(asset);
+            var value = hasSelection ? asset.Get(selectedX, selectedY) : 0;
+            var selected = hasSelection ? $"Sel ({selectedX},{selectedY}) {FormatOffset(selectedX, selectedY)} = {FormatSigned(value)}" : "Sel none";
 
+            EditorGUILayout.LabelField($"{asset.Width}x{asset.Height}  Center ({asset.CenterX},{asset.CenterY})  Active {stats.Active}/{stats.Count}  Sum {FormatSigned(stats.Sum)}  Min {FormatSigned(stats.Min)}  Max {FormatSigned(stats.Max)}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"{selected}  Brush {FormatSigned(brush)}  Shape {shape}  {writeMode}", EditorStyles.miniLabel);
+        }
+
+        private void DrawBrush()
+        {
             var row = Row();
-            row.style.justifyContent = Justify.SpaceBetween;
-            row.style.alignItems = Align.Center;
+            Label(ref row, "Brush");
 
-            var titleBox = new VisualElement();
+            EditorGUI.BeginChangeCheck();
+            brush = EditorGUI.IntField(Slice(ref row, 50f), brush);
+            if (EditorGUI.EndChangeCheck())
+                brush = ClampToSByte(brush);
 
-            var title = Label("Spatial Mask", 16, FontStyle.Bold, Text());
-            titleBox.Add(title);
+            if (Button(ref row, "-5", 28f, EditorStyles.miniButtonLeft))
+                brush = ClampToSByte(brush - 5);
 
-            var subtitle = Label("Actor-local signed grid. Top is forward. Center is the anchor.", 11, FontStyle.Normal, SubText());
-            subtitle.style.marginTop = 2;
-            subtitle.style.whiteSpace = WhiteSpace.Normal;
-            titleBox.Add(subtitle);
+            if (Button(ref row, "-1", 28f, EditorStyles.miniButtonMid))
+                brush = ClampToSByte(brush - 1);
 
-            summaryLabel = Label("", 11, FontStyle.Bold, SubText());
-            summaryLabel.style.unityTextAlign = TextAnchor.MiddleRight;
-            summaryLabel.style.marginLeft = 12;
+            if (Button(ref row, "0", 24f, EditorStyles.miniButtonMid))
+                brush = 0;
 
-            row.Add(titleBox);
-            row.Add(summaryLabel);
-            card.Add(row);
+            if (Button(ref row, "+1", 28f, EditorStyles.miniButtonMid))
+                brush = ClampToSByte(brush + 1);
 
-            return card;
+            if (Button(ref row, "+5", 28f, EditorStyles.miniButtonMid))
+                brush = ClampToSByte(brush + 5);
+
+            if (Button(ref row, "Flip", 36f, EditorStyles.miniButtonRight))
+                brush = ClampToSByte(-brush);
         }
 
-        private VisualElement CreateBrushCard()
+        private void DrawShape()
         {
-            var card = CreateCard();
-            card.style.marginTop = 8;
-
-            card.Add(SectionTitle("Brush"));
-
             var row = Row();
-            row.style.alignItems = Align.Center;
+            Label(ref row, "Shape");
 
-            selectedLabel = Label("", 13, FontStyle.Bold, Text());
-            selectedLabel.style.minWidth = 96;
-            selectedLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
-            selectedLabel.style.paddingTop = 5;
-            selectedLabel.style.paddingBottom = 5;
-            selectedLabel.style.paddingLeft = 10;
-            selectedLabel.style.paddingRight = 10;
-            selectedLabel.style.borderTopLeftRadius = 999;
-            selectedLabel.style.borderTopRightRadius = 999;
-            selectedLabel.style.borderBottomLeftRadius = 999;
-            selectedLabel.style.borderBottomRightRadius = 999;
+            var buttonWidth = 48f;
+            var modeWidth = 104f;
+            var popupWidth = Mathf.Max(72f, row.width - modeWidth - buttonWidth - Gap * 2f);
 
-            selectedValueField = new IntegerField();
-            selectedValueField.value = selectedValue;
-            selectedValueField.style.width = 74;
-            selectedValueField.style.marginLeft = 8;
-            selectedValueField.style.marginRight = 4;
-            selectedValueField.style.color = Text();
-            selectedValueField.RegisterValueChangedCallback(evt =>
-            {
-                SetSelectedValue(evt.newValue);
-            });
+            EditorGUI.BeginChangeCheck();
+            shape = (SpatialMaskShape)EditorGUI.EnumPopup(Slice(ref row, popupWidth), shape);
+            if (EditorGUI.EndChangeCheck())
+                Repaint();
 
-            row.Add(selectedLabel);
-            row.Add(selectedValueField);
-            row.Add(Chip("-10", () => SetSelectedValue(selectedValue - 10)));
-            row.Add(Chip("-5", () => SetSelectedValue(selectedValue - 5)));
-            row.Add(Chip("-1", () => SetSelectedValue(selectedValue - 1)));
-            row.Add(Chip("0", () => SetSelectedValue(0)));
-            row.Add(Chip("+1", () => SetSelectedValue(selectedValue + 1)));
-            row.Add(Chip("+5", () => SetSelectedValue(selectedValue + 5)));
-            row.Add(Chip("+10", () => SetSelectedValue(selectedValue + 10)));
-            row.Add(Chip("Flip", () => SetSelectedValue(-selectedValue)));
+            writeMode = (SpatialMaskWriteMode)GUI.Toolbar(Slice(ref row, modeWidth), (int)writeMode, WriteModeNames, EditorStyles.miniButton);
 
-            card.Add(row);
-
-            selectedHintLabel = Label("Right-click picks. Left-click pastes. Wheel adjusts. Shift-click diffuses. Alt-click erases.", 11, FontStyle.Normal, Muted());
-            selectedHintLabel.style.marginTop = 7;
-            selectedHintLabel.style.whiteSpace = WhiteSpace.Normal;
-            card.Add(selectedHintLabel);
-
-            return card;
+            if (Button(ref row, "Apply", buttonWidth, EditorStyles.miniButton))
+                ApplyShape();
         }
 
-        private VisualElement CreateCanvasCard()
+        private void DrawGrid(Event evt)
         {
-            var card = CreateCard();
-            card.style.marginTop = 8;
+            var cellSize = CellSize();
+            var width = asset.Width * cellSize + Mathf.Max(0, asset.Width - 1) * CellGap;
+            var height = asset.Height * cellSize + Mathf.Max(0, asset.Height - 1) * CellGap;
 
-            var top = Row();
-            top.style.justifyContent = Justify.SpaceBetween;
-            top.style.alignItems = Align.Center;
+            var forward = GUILayoutUtility.GetRect(width, 14f, GUILayout.ExpandWidth(true));
+            forward.x = Mathf.Floor((EditorGUIUtility.currentViewWidth - width) * 0.5f);
+            forward.width = width;
+            GUI.Label(forward, "Forward ▲", EditorStyles.centeredGreyMiniLabel);
 
-            var title = SectionTitle("Canvas");
-            var forward = Label("FORWARD ▲", 11, FontStyle.Bold, Accent());
-            forward.style.unityTextAlign = TextAnchor.MiddleRight;
-
-            top.Add(title);
-            top.Add(forward);
-            card.Add(top);
-
-            gridRoot = new VisualElement();
-            gridRoot.style.marginTop = 8;
-            gridRoot.style.alignSelf = Align.FlexStart;
-            card.Add(gridRoot);
-
-            return card;
-        }
-
-        private VisualElement CreateShapeCard()
-        {
-            var card = CreateCard();
-            card.style.marginTop = 8;
-
-            var header = Row();
-            header.style.justifyContent = Justify.SpaceBetween;
-            header.style.alignItems = Align.Center;
-
-            header.Add(SectionTitle("Shapes"));
-
-            var modeRow = Row();
-            modeRow.style.alignItems = Align.Center;
-
-            replaceModeButton = Chip("Replace", () =>
-            {
-                replaceShape = true;
-                UpdateShapeModeButtons();
-            });
-
-            addModeButton = Chip("Add", () =>
-            {
-                replaceShape = false;
-                UpdateShapeModeButtons();
-            });
-
-            modeRow.Add(replaceModeButton);
-            modeRow.Add(addModeButton);
-            header.Add(modeRow);
-
-            card.Add(header);
-
-            var hint = Label("Click a shape to stamp it using the selected value. Negative selected values automatically become repel masks.", 11, FontStyle.Normal, Muted());
-            hint.style.marginTop = 2;
-            hint.style.marginBottom = 8;
-            hint.style.whiteSpace = WhiteSpace.Normal;
-            card.Add(hint);
-
-            AddShapeGroup(card, "Core", new[]
-            {
-                new ShapePreset(SpatialMaskShape.Point, "Point"),
-                new ShapePreset(SpatialMaskShape.Surround, "Surround"),
-                new ShapePreset(SpatialMaskShape.Square, "Square"),
-                new ShapePreset(SpatialMaskShape.Diamond, "Diamond"),
-                new ShapePreset(SpatialMaskShape.Disc, "Disc"),
-                new ShapePreset(SpatialMaskShape.Ring, "Ring"),
-            });
-
-            AddShapeGroup(card, "Combat", new[]
-            {
-                new ShapePreset(SpatialMaskShape.ForwardLine, "Line"),
-                new ShapePreset(SpatialMaskShape.ForwardCone, "Cone"),
-                new ShapePreset(SpatialMaskShape.ForwardWideCone, "Wide Cone"),
-                new ShapePreset(SpatialMaskShape.ForwardArc, "Arc"),
-                new ShapePreset(SpatialMaskShape.Corridor, "Corridor"),
-                new ShapePreset(SpatialMaskShape.Wall, "Wall"),
-            });
-
-            AddShapeGroup(card, "AI", new[]
-            {
-                new ShapePreset(SpatialMaskShape.RearCone, "Rear"),
-                new ShapePreset(SpatialMaskShape.LeftFlank, "Left Flank"),
-                new ShapePreset(SpatialMaskShape.RightFlank, "Right Flank"),
-                new ShapePreset(SpatialMaskShape.Cross, "Cross"),
-                new ShapePreset(SpatialMaskShape.DiagonalCross, "X"),
-                new ShapePreset(SpatialMaskShape.RepelRing, "Repel Ring"),
-            });
-
-            return card;
-        }
-
-        private VisualElement CreateOperationsCard()
-        {
-            var card = CreateCard();
-            card.style.marginTop = 8;
-
-            card.Add(SectionTitle("Operations"));
-
-            var sizeRow = Row();
-            sizeRow.style.marginTop = 5;
-
-            sizeRow.Add(Label("Size", 11, FontStyle.Bold, SubText()));
-            AddSizeButton(sizeRow, 1);
-            AddSizeButton(sizeRow, 3);
-            AddSizeButton(sizeRow, 5);
-            AddSizeButton(sizeRow, 7);
-            AddSizeButton(sizeRow, 9);
-            AddSizeButton(sizeRow, 11);
-            AddSizeButton(sizeRow, 15);
-
-            card.Add(sizeRow);
-
-            var opsRow = Row();
-            opsRow.style.marginTop = 7;
-
-            opsRow.Add(Label("Edit", 11, FontStyle.Bold, SubText()));
-            opsRow.Add(Chip("Clear", () => ApplyChange("Clear Spatial Mask", asset.Clear)));
-            opsRow.Add(Chip("Mirror X", () => ApplyChange("Mirror Spatial Mask X", asset.MirrorX)));
-            opsRow.Add(Chip("Mirror Y", () => ApplyChange("Mirror Spatial Mask Y", asset.MirrorY)));
-            opsRow.Add(Chip("Rotate 90°", () =>
-            {
-                if (asset.Width != asset.Height)
-                {
-                    Debug.LogWarning("SpatialMaskAsset can only rotate square masks.");
-                    return;
-                }
-
-                ApplyChange("Rotate Spatial Mask", asset.RotateClockwise);
-            }));
-
-            card.Add(opsRow);
-
-            return card;
-        }
-
-        private VisualElement CreateFooter()
-        {
-            var footer = new HelpBox(
-                "Minimal rules: Right-click samples a cell. Left-click paints selected value. Mouse wheel changes the cell value. Shift-left spreads/diffuses from the clicked cell. Alt-left erases.",
-                HelpBoxMessageType.Info);
-
-            footer.style.marginTop = 8;
-            footer.style.color = Text();
-
-            return footer;
-        }
-
-        private void RebuildGrid()
-        {
-            if (gridRoot == null)
-                return;
-
-            gridRoot.Clear();
-
-            summaryLabel.text = $"{asset.Width}x{asset.Height}  ·  {asset.NonZeroCount()} active  ·  total {asset.TotalWeight()}";
+            gridRect = GUILayoutUtility.GetRect(width, height, GUILayout.ExpandWidth(true));
+            gridRect.x = Mathf.Floor((EditorGUIUtility.currentViewWidth - width) * 0.5f);
+            gridRect.width = width;
+            gridRect.height = height;
 
             for (var y = 0; y < asset.Height; y++)
             {
-                var row = Row();
-                row.style.marginBottom = CellGap;
-
                 for (var x = 0; x < asset.Width; x++)
-                    row.Add(CreateCell(x, y));
+                {
+                    var rect = new Rect(
+                        gridRect.x + x * (cellSize + CellGap),
+                        gridRect.y + y * (cellSize + CellGap),
+                        cellSize,
+                        cellSize);
 
-                gridRoot.Add(row);
+                    DrawCell(rect, x, y, evt);
+                }
             }
-
-            UpdateSelectedLabel();
         }
 
-        private VisualElement CreateCell(int x, int y)
+        private void DrawCell(Rect rect, int x, int y, Event evt)
         {
             var value = asset.Get(x, y);
-            var isCenter = x == asset.CenterX && y == asset.CenterY;
-            var isAxis = x == asset.CenterX || y == asset.CenterY;
+            var center = x == asset.CenterX && y == asset.CenterY;
+            var axis = x == asset.CenterX || y == asset.CenterY;
+            var selected = hasSelection && x == selectedX && y == selectedY;
+            var hover = rect.Contains(evt.mousePosition);
+            var preview = TryGetShapeWeight(x, y, out var previewValue) && previewValue != 0;
 
-            var cell = new VisualElement();
-            cell.style.width = CellSize;
-            cell.style.height = CellSize;
-            cell.style.marginRight = CellGap;
-            cell.style.alignItems = Align.Center;
-            cell.style.justifyContent = Justify.Center;
-            cell.style.borderTopLeftRadius = 7;
-            cell.style.borderTopRightRadius = 7;
-            cell.style.borderBottomLeftRadius = 7;
-            cell.style.borderBottomRightRadius = 7;
-            cell.focusable = true;
+            EditorGUI.DrawRect(rect, CellBackground(value, preview));
 
-            ApplyCellStyle(cell, value, isCenter, isAxis);
+            if (preview)
+                DrawBorder(rect, PreviewBorder(), 1);
 
-            var label = Label(GetCellText(value, isCenter), isCenter && value != 0 ? 10 : 12, isCenter ? FontStyle.Bold : FontStyle.Normal, BestTextForCell(value, isCenter));
-            label.style.unityTextAlign = TextAnchor.MiddleCenter;
-            label.style.whiteSpace = WhiteSpace.Normal;
-            label.pickingMode = PickingMode.Ignore;
-            cell.Add(label);
+            if (axis)
+                DrawBorder(rect, AxisBorder(), 1);
 
-            var offset = asset.GetOffset(x, y);
-            cell.tooltip = isCenter
-                ? $"CENTER / ACTOR ANCHOR\nOffset: ({offset.x}, {offset.y})\nValue: {value}"
-                : $"Offset: ({offset.x}, {offset.y})\nValue: {value}";
+            if (center)
+                DrawCenter(rect);
 
-            cell.RegisterCallback<PointerDownEvent>(evt =>
+            if (hover)
+                DrawBorder(rect, HoverBorder(), 2);
+
+            if (selected)
+                DrawBorder(rect, SelectionBorder(), 2);
+
+            GUI.Label(rect, FormatSigned(value), CellTextStyle(value, rect.height));
+            EditorGUIUtility.AddCursorRect(rect, MouseCursor.Arrow);
+
+            if (evt.type != EventType.MouseDown || !hover)
+                return;
+
+            gridOwnsKeyboard = true;
+
+            if (evt.button == 0)
             {
-                if (evt.button == 1)
-                {
-                    PickCellValue(x, y);
-                    evt.StopPropagation();
-                    return;
-                }
-
-                if (evt.button != 0)
-                    return;
-
-                if (evt.altKey)
-                {
-                    SetCellValue(x, y, 0, "Erase Spatial Mask Cell");
-                }
-                else if (evt.shiftKey)
-                {
-                    DiffuseCell(x, y);
-                }
-                else if (evt.ctrlKey || evt.commandKey)
-                {
-                    AddCellValue(x, y, selectedValue, "Add Spatial Mask Cell");
-                }
-                else
-                {
-                    SetCellValue(x, y, selectedValue, "Paint Spatial Mask Cell");
-                }
-
-                evt.StopPropagation();
-            });
-
-            cell.RegisterCallback<WheelEvent>(evt =>
-            {
-                var step = evt.shiftKey ? 5 : 1;
-                var delta = evt.delta.y < 0 ? step : -step;
-
-                Undo.RecordObject(asset, "Scroll Spatial Mask Cell");
-
-                asset.Add(x, y, delta);
-
-                selectedValue = asset.Get(x, y);
-                selectedValueField?.SetValueWithoutNotify(selectedValue);
-
-                EditorUtility.SetDirty(asset);
-                RebuildGrid();
-
-                evt.StopPropagation();
-            });
-
-            return cell;
-        }
-
-        private void AddShapeGroup(VisualElement parent, string groupName, ShapePreset[] shapes)
-        {
-            var groupLabel = Label(groupName, 11, FontStyle.Bold, SubText());
-            groupLabel.style.marginTop = 8;
-            groupLabel.style.marginBottom = 5;
-            parent.Add(groupLabel);
-
-            var row = Row();
-            row.style.flexWrap = Wrap.Wrap;
-
-            foreach (var shape in shapes)
-                row.Add(CreateShapeButton(shape));
-
-            parent.Add(row);
-        }
-
-        private VisualElement CreateShapeButton(ShapePreset preset)
-        {
-            var button = new VisualElement();
-            button.style.width = 94;
-            button.style.height = 76;
-            button.style.marginRight = 6;
-            button.style.marginBottom = 6;
-            button.style.paddingTop = 6;
-            button.style.paddingBottom = 6;
-            button.style.paddingLeft = 6;
-            button.style.paddingRight = 6;
-            button.style.borderTopLeftRadius = 9;
-            button.style.borderTopRightRadius = 9;
-            button.style.borderBottomLeftRadius = 9;
-            button.style.borderBottomRightRadius = 9;
-            button.style.backgroundColor = ButtonBackground();
-            SetBorder(button, ButtonBorder(), 1);
-
-            var title = Label(preset.Label, 10, FontStyle.Bold, Text());
-            title.style.unityTextAlign = TextAnchor.MiddleCenter;
-            title.style.marginBottom = 5;
-            button.Add(title);
-
-            button.Add(CreateShapePreview(preset.Shape));
-
-            button.RegisterCallback<PointerEnterEvent>(_ =>
-            {
-                button.style.backgroundColor = ButtonHover();
-                SetBorder(button, AccentDim(), 1);
-            });
-
-            button.RegisterCallback<PointerLeaveEvent>(_ =>
-            {
-                button.style.backgroundColor = ButtonBackground();
-                SetBorder(button, ButtonBorder(), 1);
-            });
-
-            button.RegisterCallback<PointerDownEvent>(evt =>
-            {
-                if (evt.button != 0)
-                    return;
-
-                StampShape(preset.Shape);
-                evt.StopPropagation();
-            });
-
-            button.tooltip = $"Stamp {preset.Label} using value {selectedValue}.";
-            return button;
-        }
-
-        private VisualElement CreateShapePreview(SpatialMaskShape shape)
-        {
-            var rootPreview = new VisualElement();
-            rootPreview.style.alignSelf = Align.Center;
-
-            var radius = PreviewSize / 2;
-            var baseValue = selectedValue == 0 ? 1 : selectedValue;
-
-            for (var py = 0; py < PreviewSize; py++)
-            {
-                var row = Row();
-                row.style.marginBottom = PreviewGap;
-
-                for (var px = 0; px < PreviewSize; px++)
-                {
-                    var dx = px - radius;
-                    var dz = radius - py;
-
-                    var isCenter = dx == 0 && dz == 0;
-                    var weight = ShapeWeight(shape, dx, dz, radius, baseValue);
-
-                    var dot = new VisualElement();
-                    dot.style.width = PreviewCellSize;
-                    dot.style.height = PreviewCellSize;
-                    dot.style.marginRight = PreviewGap;
-                    dot.style.borderTopLeftRadius = 2;
-                    dot.style.borderTopRightRadius = 2;
-                    dot.style.borderBottomLeftRadius = 2;
-                    dot.style.borderBottomRightRadius = 2;
-
-                    if (weight > 0)
-                        dot.style.backgroundColor = PositivePreview();
-                    else if (weight < 0)
-                        dot.style.backgroundColor = NegativePreview();
-                    else if (isCenter)
-                        dot.style.backgroundColor = CenterPreview();
-                    else
-                        dot.style.backgroundColor = EmptyPreview();
-
-                    row.Add(dot);
-                }
-
-                rootPreview.Add(row);
+                PaintCell(x, y);
+                evt.Use();
+                return;
             }
 
-            return rootPreview;
-        }
-
-        private void AddSizeButton(VisualElement parent, int size)
-        {
-            parent.Add(Chip($"{size}x{size}", () =>
+            if (evt.button == 1)
             {
-                ApplyChange($"Resize Spatial Mask {size}x{size}", () => asset.ResizeCentered(size, size));
-            }));
+                PickCell(x, y);
+                evt.Use();
+            }
         }
 
-        private void StampShape(SpatialMaskShape shape)
+        private void DrawEdit()
         {
-            Undo.RecordObject(asset, $"Stamp Spatial Mask Shape {shape}");
+            var row = Row();
+            Label(ref row, "Edit");
 
-            if (replaceShape)
+            using (new EditorGUI.DisabledScope(!hasSelection))
+            {
+                if (Button(ref row, "Clear Cell", 76f, EditorStyles.miniButtonLeft))
+                    ClearSelectedCell();
+            }
+
+            if (Button(ref row, "Clear All", 70f, EditorStyles.miniButtonRight))
+                ApplyChange("Clear Spatial Mask", asset.Clear);
+        }
+
+        private void DrawTransform()
+        {
+            var row = Row();
+            Label(ref row, "Move");
+
+            if (Button(ref row, "Mirror X", 68f, EditorStyles.miniButtonLeft))
+                ApplyChange("Mirror Spatial Mask X", asset.MirrorX);
+
+            if (Button(ref row, "Mirror Y", 68f, EditorStyles.miniButtonMid))
+                ApplyChange("Mirror Spatial Mask Y", asset.MirrorY);
+
+            using (new EditorGUI.DisabledScope(asset.Width != asset.Height))
+            {
+                if (Button(ref row, "Rotate 90°", 78f, EditorStyles.miniButtonRight))
+                    ApplyChange("Rotate Spatial Mask", asset.RotateClockwise);
+            }
+        }
+
+        private void DrawSize()
+        {
+            var row = Row();
+            Label(ref row, "Size");
+
+            var index = SizeIndex(asset.Width, asset.Height);
+            var next = GUI.Toolbar(row, index, SizeNames, EditorStyles.miniButton);
+
+            if (next == index || next < 0 || next >= Sizes.Length)
+                return;
+
+            var size = Sizes[next];
+            ApplyChange($"Resize Spatial Mask {size}x{size}", () => asset.ResizeCentered(size, size));
+        }
+
+        private bool TryHandleKeyboard(Event evt)
+        {
+            if (!gridOwnsKeyboard || !hasSelection || evt.type != EventType.KeyDown)
+                return false;
+
+            switch (evt.keyCode)
+            {
+                case KeyCode.Delete:
+                case KeyCode.Backspace:
+                    ClearSelectedCell();
+                    evt.Use();
+                    return true;
+
+                case KeyCode.LeftArrow:
+                    TrySelect(selectedX - 1, selectedY);
+                    evt.Use();
+                    return true;
+
+                case KeyCode.RightArrow:
+                    TrySelect(selectedX + 1, selectedY);
+                    evt.Use();
+                    return true;
+
+                case KeyCode.UpArrow:
+                    TrySelect(selectedX, selectedY - 1);
+                    evt.Use();
+                    return true;
+
+                case KeyCode.DownArrow:
+                    TrySelect(selectedX, selectedY + 1);
+                    evt.Use();
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        private void PaintCell(int x, int y)
+        {
+            if (!TrySelect(x, y))
+                return;
+
+            SetCell(x, y, brush, "Paint Spatial Mask Cell");
+        }
+
+        private void PickCell(int x, int y)
+        {
+            if (!TrySelect(x, y))
+                return;
+
+            brush = asset.Get(x, y);
+            Repaint();
+        }
+
+        private void ClearSelectedCell()
+        {
+            if (!hasSelection)
+                return;
+
+            SetCell(selectedX, selectedY, 0, "Clear Spatial Mask Cell");
+        }
+
+        private bool TrySelect(int x, int y)
+        {
+            if (!asset.IsInside(x, y))
+                return false;
+
+            selectedX = x;
+            selectedY = y;
+            hasSelection = true;
+            return true;
+        }
+
+        private void SetCell(int x, int y, int value, string undoName)
+        {
+            if (!asset.IsInside(x, y))
+                return;
+
+            Undo.RecordObject(asset, undoName);
+            asset.Set(x, y, ClampToSByte(value));
+            EditorUtility.SetDirty(asset);
+            Repaint();
+        }
+
+        private void ApplyShape()
+        {
+            Undo.RecordObject(asset, $"Apply Spatial Mask Shape {shape}");
+
+            if (writeMode == SpatialMaskWriteMode.Replace)
                 asset.Clear();
-
-            var baseValue = selectedValue == 0 ? 1 : selectedValue;
-            var radius = Mathf.Min(asset.Width, asset.Height) / 2;
 
             for (var y = 0; y < asset.Height; y++)
             {
                 for (var x = 0; x < asset.Width; x++)
                 {
-                    var offset = asset.GetOffset(x, y);
-                    var weight = ShapeWeight(shape, offset.x, offset.y, radius, baseValue);
-
-                    if (weight == 0)
+                    if (!TryGetShapeWeight(x, y, out var weight) || weight == 0)
                         continue;
 
-                    if (replaceShape)
-                        asset.Set(x, y, ClampToSByte(weight));
-                    else
+                    if (writeMode == SpatialMaskWriteMode.Add)
                         asset.Add(x, y, weight);
+                    else
+                        asset.Set(x, y, ClampToSByte(weight));
                 }
             }
 
             EditorUtility.SetDirty(asset);
-            RebuildGrid();
+            Repaint();
+        }
+
+        private void ApplyChange(string undoName, Action change)
+        {
+            Undo.RecordObject(asset, undoName);
+            change.Invoke();
+            selectedX = Mathf.Clamp(selectedX, 0, Mathf.Max(0, asset.Width - 1));
+            selectedY = Mathf.Clamp(selectedY, 0, Mathf.Max(0, asset.Height - 1));
+            hasSelection = asset.IsInside(selectedX, selectedY);
+            EditorUtility.SetDirty(asset);
+            Repaint();
+        }
+
+        private bool TryGetShapeWeight(int x, int y, out int weight)
+        {
+            weight = 0;
+
+            if (!asset.IsInside(x, y))
+                return false;
+
+            var offset = asset.GetOffset(x, y);
+            var radius = Mathf.Min(asset.Width, asset.Height) / 2;
+            weight = ShapeWeight(shape, offset.x, offset.y, radius, brush);
+            return true;
         }
 
         private static int ShapeWeight(SpatialMaskShape shape, int dx, int dz, int radius, int baseValue)
@@ -568,72 +389,37 @@ namespace BovineLabs.Spatial.Authoring.Editor
             var max = Mathf.Max(absX, absZ);
             var manhattan = absX + absZ;
             var sqr = dx * dx + dz * dz;
-
             var sign = baseValue < 0 ? -1 : 1;
-            var value = Mathf.Max(1, Mathf.Abs(baseValue));
+            var value = Mathf.Abs(baseValue);
 
             return shape switch
             {
-                SpatialMaskShape.Point =>
-                    dx == 0 && dz == 0 ? baseValue : 0,
-
-                SpatialMaskShape.Surround =>
-                    max == 1 ? value * sign : 0,
-
-                SpatialMaskShape.Square =>
-                    max <= radius ? Falloff(value, max, radius) * sign : 0,
-
-                SpatialMaskShape.Diamond =>
-                    manhattan <= radius ? Falloff(value, manhattan, radius) * sign : 0,
-
-                SpatialMaskShape.Disc =>
-                    sqr <= radius * radius ? Falloff(value, Mathf.RoundToInt(Mathf.Sqrt(sqr)), radius) * sign : 0,
-
-                SpatialMaskShape.Ring =>
-                    max == radius ? value * sign : 0,
-
-                SpatialMaskShape.Cross =>
-                    dx == 0 || dz == 0 ? Falloff(value, max, radius) * sign : 0,
-
-                SpatialMaskShape.DiagonalCross =>
-                    absX == absZ ? Falloff(value, max, radius) * sign : 0,
-
-                SpatialMaskShape.ForwardLine =>
-                    dx == 0 && dz > 0 ? Falloff(value, dz, radius) * sign : 0,
-
-                SpatialMaskShape.ForwardCone =>
-                    dz > 0 && absX <= dz ? Falloff(value, dz, radius) * sign : 0,
-
-                SpatialMaskShape.ForwardWideCone =>
-                    dz > 0 && absX <= dz + 1 ? Falloff(value, dz, radius) * sign : 0,
-
-                SpatialMaskShape.ForwardArc =>
-                    dz > 0 && absX <= dz && max >= Mathf.Max(1, radius - 1) ? value * sign : 0,
-
-                SpatialMaskShape.RearCone =>
-                    dz < 0 && absX <= -dz ? Falloff(value, -dz, radius) * sign : 0,
-
-                SpatialMaskShape.LeftFlank =>
-                    dx < 0 && absZ <= absX ? Falloff(value, absX, radius) * sign : 0,
-
-                SpatialMaskShape.RightFlank =>
-                    dx > 0 && absZ <= absX ? Falloff(value, absX, radius) * sign : 0,
-
-                SpatialMaskShape.Corridor =>
-                    dz > 0 && absX <= 1 ? Falloff(value, dz, radius) * sign : 0,
-
-                SpatialMaskShape.Wall =>
-                    dz == 1 && absX <= radius ? value * sign : 0,
-
-                SpatialMaskShape.RepelRing =>
-                    max == radius ? -value : 0,
-
+                SpatialMaskShape.Point => dx == 0 && dz == 0 ? baseValue : 0,
+                SpatialMaskShape.Surround => max == 1 ? value * sign : 0,
+                SpatialMaskShape.Square => max <= radius ? Falloff(value, max, radius) * sign : 0,
+                SpatialMaskShape.Diamond => manhattan <= radius ? Falloff(value, manhattan, radius) * sign : 0,
+                SpatialMaskShape.Disc => sqr <= radius * radius ? Falloff(value, Mathf.RoundToInt(Mathf.Sqrt(sqr)), radius) * sign : 0,
+                SpatialMaskShape.Ring => max == radius ? value * sign : 0,
+                SpatialMaskShape.Cross => dx == 0 || dz == 0 ? Falloff(value, max, radius) * sign : 0,
+                SpatialMaskShape.DiagonalCross => absX == absZ ? Falloff(value, max, radius) * sign : 0,
+                SpatialMaskShape.ForwardLine => dx == 0 && dz > 0 ? Falloff(value, dz, radius) * sign : 0,
+                SpatialMaskShape.ForwardCone => dz > 0 && absX <= dz ? Falloff(value, dz, radius) * sign : 0,
+                SpatialMaskShape.ForwardWideCone => dz > 0 && absX <= dz + 1 ? Falloff(value, dz, radius) * sign : 0,
+                SpatialMaskShape.Corridor => dz > 0 && absX <= 1 ? Falloff(value, dz, radius) * sign : 0,
+                SpatialMaskShape.Wall => dz == 1 && absX <= radius ? value * sign : 0,
+                SpatialMaskShape.RearCone => dz < 0 && absX <= -dz ? Falloff(value, -dz, radius) * sign : 0,
+                SpatialMaskShape.LeftFlank => dx < 0 && absZ <= absX ? Falloff(value, absX, radius) * sign : 0,
+                SpatialMaskShape.RightFlank => dx > 0 && absZ <= absX ? Falloff(value, absX, radius) * sign : 0,
+                SpatialMaskShape.RepelRing => max == radius ? -value : 0,
                 _ => 0,
             };
         }
 
         private static int Falloff(int value, int distance, int radius)
         {
+            if (value == 0)
+                return 0;
+
             if (distance <= 0)
                 return value;
 
@@ -641,290 +427,75 @@ namespace BovineLabs.Spatial.Authoring.Editor
             return Mathf.Max(1, Mathf.RoundToInt(value * t));
         }
 
-        private void DiffuseCell(int x, int y)
+        private int CellSize()
         {
-            var source = asset.Get(x, y);
+            var available = Mathf.Max(100f, EditorGUIUtility.currentViewWidth - 26f);
+            var fit = Mathf.FloorToInt((available - Mathf.Max(0, asset.Width - 1) * CellGap) / Mathf.Max(1, asset.Width));
+            return Mathf.Clamp(fit, CellMin, CellMax);
+        }
 
-            if (source == 0)
-                source = ClampToSByte(selectedValue == 0 ? 1 : selectedValue);
+        private Rect Row()
+        {
+            return EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
+        }
 
-            Undo.RecordObject(asset, "Diffuse Spatial Mask Cell");
+        private static void Label(ref Rect row, string text)
+        {
+            var rect = Slice(ref row, LabelWidth);
+            EditorGUI.LabelField(rect, text);
+        }
 
-            for (var oy = -1; oy <= 1; oy++)
+        private static bool Button(ref Rect row, string text, float width, GUIStyle style)
+        {
+            return GUI.Button(Slice(ref row, width), text, style);
+        }
+
+        private static Rect Slice(ref Rect row, float width)
+        {
+            width = Mathf.Min(width, row.width);
+            var rect = new Rect(row.x, row.y, width, row.height);
+            row.x += width + Gap;
+            row.width = Mathf.Max(0f, row.width - width - Gap);
+            return rect;
+        }
+
+        private static int SizeIndex(int width, int height)
+        {
+            if (width != height)
+                return -1;
+
+            for (var i = 0; i < Sizes.Length; i++)
             {
-                for (var ox = -1; ox <= 1; ox++)
-                {
-                    var nx = x + ox;
-                    var ny = y + oy;
-
-                    if (!asset.IsInside(nx, ny))
-                        continue;
-
-                    var absX = Mathf.Abs(ox);
-                    var absY = Mathf.Abs(oy);
-
-                    var factor = absX + absY switch
-                    {
-                        0 => 1.00f,
-                        1 => 0.66f,
-                        _ => 0.33f,
-                    };
-
-                    var spread = Mathf.RoundToInt(source * factor);
-
-                    if (spread == 0 && source != 0)
-                        spread = source > 0 ? 1 : -1;
-
-                    var current = asset.Get(nx, ny);
-
-                    // Diffusion should feel like spreading intent, not vandalizing careful stronger cells.
-                    if (Mathf.Abs(spread) >= Mathf.Abs(current))
-                        asset.Set(nx, ny, ClampToSByte(spread));
-                }
+                if (Sizes[i] == width)
+                    return i;
             }
 
-            EditorUtility.SetDirty(asset);
-            RebuildGrid();
+            return -1;
         }
 
-        private void PickCellValue(int x, int y)
+        private static GUIStyle CellTextStyle(sbyte value, float height)
         {
-            selectedValue = asset.Get(x, y);
-            selectedValueField?.SetValueWithoutNotify(selectedValue);
-            UpdateSelectedLabel();
-        }
-
-        private void SetSelectedValue(int value)
-        {
-            selectedValue = Mathf.Clamp(value, sbyte.MinValue, sbyte.MaxValue);
-            selectedValueField?.SetValueWithoutNotify(selectedValue);
-            UpdateSelectedLabel();
-            RepaintShapePreviews();
-        }
-
-        private void SetCellValue(int x, int y, int value, string undoName)
-        {
-            Undo.RecordObject(asset, undoName);
-            asset.Set(x, y, ClampToSByte(value));
-            EditorUtility.SetDirty(asset);
-            RebuildGrid();
-        }
-
-        private void AddCellValue(int x, int y, int value, string undoName)
-        {
-            Undo.RecordObject(asset, undoName);
-            asset.Add(x, y, value);
-            EditorUtility.SetDirty(asset);
-            RebuildGrid();
-        }
-
-        private void ApplyChange(string undoName, Action action)
-        {
-            Undo.RecordObject(asset, undoName);
-            action.Invoke();
-            EditorUtility.SetDirty(asset);
-            RebuildGrid();
-        }
-
-        private void RepaintShapePreviews()
-        {
-            // Full rebuild keeps previews honest with the selected sign/value.
-            // It is tiny editor UI, not runtime code.
-            if (root == null)
-                return;
-
-            root.Clear();
-            root.Add(CreateHeader());
-            root.Add(CreateBrushCard());
-            root.Add(CreateCanvasCard());
-            root.Add(CreateShapeCard());
-            root.Add(CreateOperationsCard());
-            root.Add(CreateFooter());
-
-            RebuildGrid();
-            UpdateSelectedLabel();
-            UpdateShapeModeButtons();
-        }
-
-        private void UpdateSelectedLabel()
-        {
-            if (selectedLabel == null)
-                return;
-
-            selectedLabel.text = selectedValue switch
+            var style = new GUIStyle(EditorStyles.miniLabel)
             {
-                > 0 => $"Attract  +{selectedValue}",
-                < 0 => $"Repel  {selectedValue}",
-                _ => "Erase  0",
+                alignment = TextAnchor.MiddleCenter,
+                clipping = TextClipping.Clip,
+                wordWrap = false,
+                fontSize = height <= 18 ? 8 : 9,
             };
 
-            selectedLabel.style.color = selectedValue switch
-            {
-                > 0 => SelectedPositiveText(),
-                < 0 => SelectedNegativeText(),
-                _ => Text(),
-            };
-
-            selectedLabel.style.backgroundColor = selectedValue switch
-            {
-                > 0 => SelectedPositiveBackground(),
-                < 0 => SelectedNegativeBackground(),
-                _ => NeutralPill(),
-            };
-
-            SetBorder(selectedLabel, selectedValue switch
-            {
-                > 0 => PositiveBorder(),
-                < 0 => NegativeBorder(),
-                _ => ButtonBorder(),
-            }, 1);
+            style.normal.textColor = TextColor(value);
+            return style;
         }
 
-        private void UpdateShapeModeButtons()
+        private string FormatOffset(int x, int y)
         {
-            if (replaceModeButton == null || addModeButton == null)
-                return;
-
-            ApplyModeButtonStyle(replaceModeButton, replaceShape);
-            ApplyModeButtonStyle(addModeButton, !replaceShape);
+            var offset = asset.GetOffset(x, y);
+            return $"({FormatSigned(offset.x)},{FormatSigned(offset.y)})";
         }
 
-        private void ApplyModeButtonStyle(Button button, bool active)
+        private static string FormatSigned(int value)
         {
-            button.style.backgroundColor = active ? AccentBackground() : ButtonBackground();
-            button.style.color = active ? AccentText() : Text();
-            SetBorder(button, active ? Accent() : ButtonBorder(), 1);
-        }
-
-        private static string GetCellText(sbyte value, bool isCenter)
-        {
-            if (isCenter)
-                return value == 0 ? "◎" : $"◎\n{value}";
-
-            return value == 0 ? string.Empty : value.ToString();
-        }
-
-        private void ApplyCellStyle(VisualElement cell, sbyte value, bool isCenter, bool isAxis)
-        {
-            var bg = CellBackground();
-            var border = isAxis ? AxisBorder() : CellBorder();
-            var borderWidth = isAxis ? 1.25f : 1f;
-
-            if (value > 0)
-            {
-                var t = Mathf.InverseLerp(1, 32, Mathf.Abs(value));
-                bg = Color.Lerp(PositiveLow(), PositiveHigh(), t);
-                border = PositiveBorder();
-                borderWidth = 1f;
-            }
-            else if (value < 0)
-            {
-                var t = Mathf.InverseLerp(1, 32, Mathf.Abs(value));
-                bg = Color.Lerp(NegativeLow(), NegativeHigh(), t);
-                border = NegativeBorder();
-                borderWidth = 1f;
-            }
-
-            if (isCenter)
-            {
-                border = CenterBorder();
-                borderWidth = 2.5f;
-            }
-
-            cell.style.backgroundColor = bg;
-            SetBorder(cell, border, borderWidth);
-        }
-
-        private Color BestTextForCell(sbyte value, bool isCenter)
-        {
-            if (isCenter && value == 0)
-                return CenterBorder();
-
-            if (value > 0)
-                return IsDark ? Color.white : new Color(0.12f, 0.08f, 0.02f, 1f);
-
-            if (value < 0)
-                return IsDark ? Color.white : new Color(0.02f, 0.06f, 0.12f, 1f);
-
-            return Text();
-        }
-
-        private Button Chip(string text, Action action)
-        {
-            var button = new Button(action)
-            {
-                text = text,
-            };
-
-            button.style.height = 24;
-            button.style.marginLeft = 4;
-            button.style.marginRight = 0;
-            button.style.marginBottom = 4;
-            button.style.paddingLeft = 8;
-            button.style.paddingRight = 8;
-            button.style.borderTopLeftRadius = 6;
-            button.style.borderTopRightRadius = 6;
-            button.style.borderBottomLeftRadius = 6;
-            button.style.borderBottomRightRadius = 6;
-            button.style.backgroundColor = ButtonBackground();
-            button.style.color = Text();
-            SetBorder(button, ButtonBorder(), 1);
-
-            return button;
-        }
-
-        private VisualElement CreateCard()
-        {
-            var card = new VisualElement();
-            card.style.paddingTop = 9;
-            card.style.paddingBottom = 9;
-            card.style.paddingLeft = 10;
-            card.style.paddingRight = 10;
-            card.style.borderTopLeftRadius = 10;
-            card.style.borderTopRightRadius = 10;
-            card.style.borderBottomLeftRadius = 10;
-            card.style.borderBottomRightRadius = 10;
-            card.style.backgroundColor = CardBackground();
-            SetBorder(card, CardBorder(), 1);
-            return card;
-        }
-
-        private static VisualElement Row()
-        {
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.flexWrap = Wrap.Wrap;
-            row.style.alignItems = Align.Center;
-            return row;
-        }
-
-        private Label SectionTitle(string text)
-        {
-            var label = Label(text, 12, FontStyle.Bold, Text());
-            label.style.marginBottom = 2;
-            return label;
-        }
-
-        private static Label Label(string text, int size, FontStyle style, Color color)
-        {
-            var label = new Label(text);
-            label.style.fontSize = size;
-            label.style.unityFontStyleAndWeight = style;
-            label.style.color = color;
-            return label;
-        }
-
-        private static void SetBorder(VisualElement element, Color color, float width)
-        {
-            element.style.borderTopColor = color;
-            element.style.borderBottomColor = color;
-            element.style.borderLeftColor = color;
-            element.style.borderRightColor = color;
-
-            element.style.borderTopWidth = width;
-            element.style.borderBottomWidth = width;
-            element.style.borderLeftWidth = width;
-            element.style.borderRightWidth = width;
+            return value > 0 ? $"+{value}" : value.ToString();
         }
 
         private static sbyte ClampToSByte(int value)
@@ -932,144 +503,154 @@ namespace BovineLabs.Spatial.Authoring.Editor
             return (sbyte)Mathf.Clamp(value, sbyte.MinValue, sbyte.MaxValue);
         }
 
-        private Color RootBackground() => IsDark
-            ? new Color(0.105f, 0.105f, 0.110f, 1f)
-            : new Color(0.925f, 0.915f, 0.885f, 1f);
-
-        private Color CardBackground() => IsDark
-            ? new Color(0.145f, 0.145f, 0.155f, 1f)
-            : new Color(0.985f, 0.975f, 0.940f, 1f);
-
-        private Color CardBorder() => IsDark
-            ? new Color(0.245f, 0.245f, 0.260f, 1f)
-            : new Color(0.760f, 0.735f, 0.680f, 1f);
-
-        private Color Text() => IsDark
-            ? new Color(0.910f, 0.910f, 0.920f, 1f)
-            : new Color(0.095f, 0.085f, 0.070f, 1f);
-
-        private Color SubText() => IsDark
-            ? new Color(0.680f, 0.680f, 0.700f, 1f)
-            : new Color(0.330f, 0.300f, 0.250f, 1f);
-
-        private Color Muted() => IsDark
-            ? new Color(0.560f, 0.560f, 0.585f, 1f)
-            : new Color(0.450f, 0.410f, 0.340f, 1f);
-
-        private Color ButtonBackground() => IsDark
-            ? new Color(0.190f, 0.190f, 0.205f, 1f)
-            : new Color(0.910f, 0.890f, 0.830f, 1f);
-
-        private Color ButtonHover() => IsDark
-            ? new Color(0.245f, 0.245f, 0.265f, 1f)
-            : new Color(0.965f, 0.940f, 0.860f, 1f);
-
-        private Color ButtonBorder() => IsDark
-            ? new Color(0.340f, 0.340f, 0.365f, 1f)
-            : new Color(0.690f, 0.655f, 0.590f, 1f);
-
-        private Color CellBackground() => IsDark
-            ? new Color(0.175f, 0.175f, 0.185f, 1f)
-            : new Color(0.880f, 0.855f, 0.790f, 1f);
-
-        private Color CellBorder() => IsDark
-            ? new Color(0.255f, 0.255f, 0.270f, 1f)
-            : new Color(0.720f, 0.685f, 0.610f, 1f);
-
-        private Color AxisBorder() => IsDark
-            ? new Color(0.390f, 0.390f, 0.420f, 1f)
-            : new Color(0.555f, 0.510f, 0.420f, 1f);
-
-        private Color CenterBorder() => IsDark
-            ? new Color(1.000f, 0.930f, 0.720f, 1f)
-            : new Color(0.070f, 0.060f, 0.040f, 1f);
-
-        private Color Accent() => IsDark
-            ? new Color(1.000f, 0.660f, 0.220f, 1f)
-            : new Color(0.620f, 0.340f, 0.050f, 1f);
-
-        private Color AccentDim() => IsDark
-            ? new Color(0.800f, 0.500f, 0.160f, 1f)
-            : new Color(0.720f, 0.430f, 0.100f, 1f);
-
-        private Color AccentBackground() => IsDark
-            ? new Color(0.330f, 0.220f, 0.100f, 1f)
-            : new Color(1.000f, 0.850f, 0.550f, 1f);
-
-        private Color AccentText() => IsDark
-            ? new Color(1.000f, 0.940f, 0.820f, 1f)
-            : new Color(0.160f, 0.090f, 0.020f, 1f);
-
-        private Color PositiveLow() => IsDark
-            ? new Color(0.280f, 0.205f, 0.105f, 1f)
-            : new Color(1.000f, 0.875f, 0.580f, 1f);
-
-        private Color PositiveHigh() => IsDark
-            ? new Color(0.850f, 0.485f, 0.055f, 1f)
-            : new Color(0.930f, 0.520f, 0.085f, 1f);
-
-        private Color PositiveBorder() => IsDark
-            ? new Color(1.000f, 0.650f, 0.170f, 1f)
-            : new Color(0.530f, 0.290f, 0.040f, 1f);
-
-        private Color NegativeLow() => IsDark
-            ? new Color(0.095f, 0.175f, 0.270f, 1f)
-            : new Color(0.660f, 0.835f, 0.970f, 1f);
-
-        private Color NegativeHigh() => IsDark
-            ? new Color(0.055f, 0.345f, 0.700f, 1f)
-            : new Color(0.210f, 0.540f, 0.875f, 1f);
-
-        private Color NegativeBorder() => IsDark
-            ? new Color(0.300f, 0.650f, 1.000f, 1f)
-            : new Color(0.060f, 0.290f, 0.560f, 1f);
-
-        private Color SelectedPositiveBackground() => IsDark
-            ? new Color(0.300f, 0.205f, 0.090f, 1f)
-            : new Color(1.000f, 0.855f, 0.575f, 1f);
-
-        private Color SelectedNegativeBackground() => IsDark
-            ? new Color(0.095f, 0.200f, 0.330f, 1f)
-            : new Color(0.690f, 0.850f, 0.980f, 1f);
-
-        private Color SelectedPositiveText() => IsDark
-            ? new Color(1.000f, 0.800f, 0.430f, 1f)
-            : new Color(0.250f, 0.130f, 0.020f, 1f);
-
-        private Color SelectedNegativeText() => IsDark
-            ? new Color(0.590f, 0.830f, 1.000f, 1f)
-            : new Color(0.030f, 0.160f, 0.310f, 1f);
-
-        private Color NeutralPill() => IsDark
-            ? new Color(0.220f, 0.220f, 0.235f, 1f)
-            : new Color(0.860f, 0.835f, 0.775f, 1f);
-
-        private Color PositivePreview() => IsDark
-            ? new Color(1.000f, 0.610f, 0.170f, 1f)
-            : new Color(0.820f, 0.420f, 0.065f, 1f);
-
-        private Color NegativePreview() => IsDark
-            ? new Color(0.330f, 0.680f, 1.000f, 1f)
-            : new Color(0.120f, 0.390f, 0.700f, 1f);
-
-        private Color CenterPreview() => IsDark
-            ? new Color(0.880f, 0.820f, 0.620f, 1f)
-            : new Color(0.165f, 0.140f, 0.085f, 1f);
-
-        private Color EmptyPreview() => IsDark
-            ? new Color(0.265f, 0.265f, 0.280f, 1f)
-            : new Color(0.770f, 0.735f, 0.660f, 1f);
-
-        private readonly struct ShapePreset
+        private static void DrawCenter(Rect rect)
         {
-            public readonly SpatialMaskShape Shape;
-            public readonly string Label;
+            DrawBorder(rect, CenterBorder(), 2);
+            var size = Mathf.Max(3f, Mathf.Floor(rect.width * 0.2f));
+            var dot = new Rect(rect.xMin + 3f, rect.yMin + 3f, size, size);
+            EditorGUI.DrawRect(dot, CenterBorder());
+        }
 
-            public ShapePreset(SpatialMaskShape shape, string label)
+        private static void DrawBorder(Rect rect, Color color, int thickness)
+        {
+            for (var i = 0; i < thickness; i++)
             {
-                Shape = shape;
-                Label = label;
+                EditorGUI.DrawRect(new Rect(rect.xMin + i, rect.yMin + i, rect.width - i * 2, 1), color);
+                EditorGUI.DrawRect(new Rect(rect.xMin + i, rect.yMax - i - 1, rect.width - i * 2, 1), color);
+                EditorGUI.DrawRect(new Rect(rect.xMin + i, rect.yMin + i, 1, rect.height - i * 2), color);
+                EditorGUI.DrawRect(new Rect(rect.xMax - i - 1, rect.yMin + i, 1, rect.height - i * 2), color);
             }
+        }
+
+        private static Color CellBackground(sbyte value, bool preview)
+        {
+            if (value == 0)
+                return preview ? PreviewFill() : EmptyFill();
+
+            var band = Mathf.Clamp(Mathf.Abs(value) / 3, 0, 3);
+
+            if (IsDark)
+                return value > 0 ? Gray(3 + band) : Gray(2);
+
+            return value > 0 ? Gray(8 - band) : Gray(9);
+        }
+
+        private static Color TextColor(sbyte value)
+        {
+            if (IsDark)
+                return value == 0 ? Color.gray6 : Color.gray9;
+
+            return value == 0 ? Color.gray4 : Color.black;
+        }
+
+        private static Color EmptyFill()
+        {
+            return IsDark ? Color.gray2 : Color.gray8;
+        }
+
+        private static Color PreviewFill()
+        {
+            return IsDark ? Color.gray3 : Color.gray7;
+        }
+
+        private static Color AxisBorder()
+        {
+            return IsDark ? Color.gray4 : Color.gray6;
+        }
+
+        private static Color CenterBorder()
+        {
+            return IsDark ? Color.white : Color.black;
+        }
+
+        private static Color HoverBorder()
+        {
+            return IsDark ? Color.gray9 : Color.gray1;
+        }
+
+        private static Color SelectionBorder()
+        {
+            return IsDark ? Color.white : Color.black;
+        }
+
+        private static Color PreviewBorder()
+        {
+            return IsDark ? Color.gray6 : Color.gray4;
+        }
+
+        private static Color Gray(int value)
+        {
+            return value switch
+            {
+                <= 1 => Color.gray1,
+                2 => Color.gray2,
+                3 => Color.gray3,
+                4 => Color.gray4,
+                5 => Color.gray5,
+                6 => Color.gray6,
+                7 => Color.gray7,
+                8 => Color.gray8,
+                _ => Color.gray9,
+            };
+        }
+
+        private readonly struct SpatialMaskStats
+        {
+            public readonly int Count;
+            public readonly int Active;
+            public readonly int Sum;
+            public readonly int Min;
+            public readonly int Max;
+
+            private SpatialMaskStats(int count, int active, int sum, int min, int max)
+            {
+                Count = count;
+                Active = active;
+                Sum = sum;
+                Min = min;
+                Max = max;
+            }
+
+            public static SpatialMaskStats From(SpatialMaskAsset asset)
+            {
+                var count = asset.Width * asset.Height;
+                var active = 0;
+                var sum = 0;
+                var min = 0;
+                var max = 0;
+                var initialized = false;
+
+                for (var y = 0; y < asset.Height; y++)
+                {
+                    for (var x = 0; x < asset.Width; x++)
+                    {
+                        var value = asset.Get(x, y);
+                        sum += value;
+
+                        if (value != 0)
+                            active++;
+
+                        if (!initialized)
+                        {
+                            min = value;
+                            max = value;
+                            initialized = true;
+                            continue;
+                        }
+
+                        min = Mathf.Min(min, value);
+                        max = Mathf.Max(max, value);
+                    }
+                }
+
+                return new SpatialMaskStats(count, active, sum, min, max);
+            }
+        }
+
+        private enum SpatialMaskWriteMode
+        {
+            Replace,
+            Add,
         }
 
         private enum SpatialMaskShape
@@ -1080,21 +661,16 @@ namespace BovineLabs.Spatial.Authoring.Editor
             Diamond,
             Disc,
             Ring,
-
             Cross,
             DiagonalCross,
-
             ForwardLine,
             ForwardCone,
             ForwardWideCone,
-            ForwardArc,
             Corridor,
             Wall,
-
             RearCone,
             LeftFlank,
             RightFlank,
-
             RepelRing,
         }
     }
