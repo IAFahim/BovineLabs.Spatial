@@ -52,6 +52,8 @@ namespace BovineLabs.Spatial
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            state.Dependency.Complete();
+
             var buildSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialMapBuildSystem>();
             if (!state.EntityManager.HasComponent<SpatialMapSingleton>(buildSystemHandle)) return;
 
