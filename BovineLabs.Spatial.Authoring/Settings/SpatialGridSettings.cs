@@ -18,7 +18,7 @@ namespace BovineLabs.Spatial.Settings
         [SerializeField] private int activeMapSize = 100;
 
         [Header("Mask Schemas")]
-        [SerializeField] private List<SpatialMaskAsset> schemas = new();
+        [SerializeField] public List<SpatialMaskAsset> schemas = new();
 
         [Header("Debug Visualization")]
         [SerializeField] private VisualizationMode visMode = VisualizationMode.CubeHeight;
@@ -28,8 +28,6 @@ namespace BovineLabs.Spatial.Settings
         [SerializeField, Range(0.1f, 1f)] private float opacity = 0.85f;
         [SerializeField] private bool showGrid = true;
         [SerializeField] private bool showNegativeBelow = true;
-
-        public IReadOnlyList<SpatialMaskAsset> Schemas => schemas;
 
         public override void Bake(Baker<SettingsAuthoring> baker)
         {
