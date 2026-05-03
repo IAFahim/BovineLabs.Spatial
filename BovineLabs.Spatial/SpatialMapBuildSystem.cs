@@ -29,7 +29,7 @@ namespace BovineLabs.Spatial
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            this.targetQuery = SystemAPI.QueryBuilder().WithAll<SpatialTarget, LocalTransform>().Build();
+            this.targetQuery = SystemAPI.QueryBuilder().WithAll<SpatialTarget, LocalToWorld>().Build();
             this.cameraQuery = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalToWorld>().Build();
             this.positions = new NativeList<SpatialPosition>(Allocator.Persistent);
             this.Entities = new NativeList<Entity>(Allocator.Persistent);
@@ -84,7 +84,7 @@ namespace BovineLabs.Spatial
                 CameraPos = camPos,
                 Positions = this.positions.AsArray(),
                 Entities = this.Entities.AsArray(),
-                TransformHandle = SystemAPI.GetComponentTypeHandle<LocalTransform>(true),
+                TransformHandle = SystemAPI.GetComponentTypeHandle<LocalToWorld>(true),
                 EntityHandle = SystemAPI.GetEntityTypeHandle(),
                 BaseIndices = this.targetQuery.CalculateBaseEntityIndexArrayAsync(state.WorldUpdateAllocator, state.Dependency, out var baseDep)
             }.ScheduleParallel(this.targetQuery, JobHandle.CombineDependencies(state.Dependency, baseDep));
@@ -105,7 +105,7 @@ namespace BovineLabs.Spatial
             public float2 CameraPos;
             [NativeDisableContainerSafetyRestriction] public NativeArray<SpatialPosition> Positions;
             [NativeDisableContainerSafetyRestriction] public NativeArray<Entity> Entities;
-            [ReadOnly] public ComponentTypeHandle<LocalTransform> TransformHandle;
+            [ReadOnly] public ComponentTypeHandle<LocalToWorld> TransformHandle;
             [ReadOnly] public EntityTypeHandle EntityHandle;
             [ReadOnly] public NativeArray<int> BaseIndices;
 

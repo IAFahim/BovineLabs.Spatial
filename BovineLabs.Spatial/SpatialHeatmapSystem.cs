@@ -24,7 +24,7 @@ namespace BovineLabs.Spatial
         private NativeParallelHashMap<int, int> heatmap;
         private NativeList<int> uniqueKeys;
         
-        private ComponentLookup<LocalTransform> transformLookup;
+        private ComponentLookup<LocalToWorld> transformLookup;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -33,7 +33,7 @@ namespace BovineLabs.Spatial
             this.heatmap = new NativeParallelHashMap<int, int>(1024, Allocator.Persistent);
             this.uniqueKeys = new NativeList<int>(1024, Allocator.Persistent);
 
-            this.transformLookup = state.GetComponentLookup<LocalTransform>(true);
+            this.transformLookup = state.GetComponentLookup<LocalToWorld>(true);
 
             state.EntityManager.AddComponent<SpatialHeatmapSingleton>(state.SystemHandle);
 
@@ -95,7 +95,7 @@ namespace BovineLabs.Spatial
         {
             [ReadOnly] public SpatialMapSingleton MapSingleton;
             [ReadOnly] public SpatialMaskDatabase MaskDatabase;
-            [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
+            [ReadOnly] public ComponentLookup<LocalToWorld> TransformLookup;
             
             public NativeParallelMultiHashMap<int, int>.ParallelWriter MultiMap;
 

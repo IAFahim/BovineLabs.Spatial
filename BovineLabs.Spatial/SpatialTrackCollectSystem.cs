@@ -41,7 +41,7 @@ namespace BovineLabs.Spatial
         private ComponentLookup<TargetsCustom> customsLookup;
         private UnsafeComponentLookup<EntityLinkSource> sourcesLookup;
         private UnsafeBufferLookup<EntityLinkEntry> linksLookup;
-        private ComponentLookup<LocalTransform> transformLookup;
+        private ComponentLookup<LocalToWorld> transformLookup;
         
         private IntrinsicWriter.Lookup intrinsicWriters;
         private ConditionEventWriter.Lookup eventWriters;
@@ -58,7 +58,7 @@ namespace BovineLabs.Spatial
             this.customsLookup = state.GetComponentLookup<TargetsCustom>(true);
             this.sourcesLookup = state.GetUnsafeComponentLookup<EntityLinkSource>(true);
             this.linksLookup = state.GetUnsafeBufferLookup<EntityLinkEntry>(true);
-            this.transformLookup = state.GetComponentLookup<LocalTransform>(true);
+            this.transformLookup = state.GetComponentLookup<LocalToWorld>(true);
 
             this.intrinsicWriters.Create(ref state);
             this.eventWriters.Create(ref state);
@@ -172,7 +172,7 @@ namespace BovineLabs.Spatial
             [ReadOnly] public ComponentLookup<TargetsCustom> CustomsLookup;
             [ReadOnly] public UnsafeComponentLookup<EntityLinkSource> SourcesLookup;
             [ReadOnly] public UnsafeBufferLookup<EntityLinkEntry> LinksLookup;
-            [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
+            [ReadOnly] public ComponentLookup<LocalToWorld> TransformLookup;
 
             public NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount>.ParallelWriter IntrinsicChanges;
             public NativeParallelMultiHashMapFallback<Entity, EventAmount>.ParallelWriter EventChanges;

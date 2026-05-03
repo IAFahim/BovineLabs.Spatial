@@ -25,7 +25,7 @@ namespace BovineLabs.Spatial.Settings
         public override void Bake(Baker<SettingsAuthoring> baker)
         {
             var entity = baker.GetEntity(TransformUsageFlags.None);
-            var blob = CreateMaskDatabaseBlob();
+            var blob = CreateMaskDatabaseBlob(baker);
             baker.AddBlobAsset(ref blob, out _);
             
             baker.AddComponent(entity, new SpatialMaskDatabase { Blob = blob });
@@ -40,9 +40,9 @@ namespace BovineLabs.Spatial.Settings
             baker.AddComponent<SpatialTrackingActive>(entity);
         }
 
-        private BlobAssetReference<SpatialMaskDatabaseBlob> CreateMaskDatabaseBlob()
+        private BlobAssetReference<SpatialMaskDatabaseBlob> CreateMaskDatabaseBlob(IBaker baker)
         {
-            var masks = this.ValidMasks();
+            var masks = this.ValidMasks(baker);
             var builder = new BlobBuilder(Allocator.Temp);
             ref var root = ref builder.ConstructRoot<SpatialMaskDatabaseBlob>();
             var entries = builder.Allocate(ref root.Masks, MaskArrayLength(masks));
@@ -63,7 +63,7 @@ namespace BovineLabs.Spatial.Settings
             return blob;
         }
 
-        private List<SpatialMaskAsset> ValidMasks()
+        private List<SpatialMaskAsset> ValidMasks(IBaker baker)
         {
             var result = new List<SpatialMaskAsset>();
             var keys = new HashSet<ushort>();
@@ -86,6 +86,7 @@ namespace BovineLabs.Spatial.Settings
                 }
 
                 result.Add(mask);
+                baker.DependsOn(mask);
             }
 
             return result;

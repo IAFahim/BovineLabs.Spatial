@@ -138,7 +138,7 @@ namespace BovineLabs.Spatial.Debug
         {
             public Drawer Drawer;
 
-            private void Execute(in LocalTransform transform)
+            private void Execute(in LocalToWorld transform)
             {
                 this.Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
             }
