@@ -153,8 +153,7 @@ namespace BovineLabs.Spatial.Debug
 
                     float t = math.clamp((float)weight / maxAbs, -1f, 1f);
                     float absT = math.abs(t);
-
-                    // choose size based on mode
+                    
                     float3 size;
                     float yPos = 0f;
                     switch (Vis.Mode)
