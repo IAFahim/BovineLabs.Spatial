@@ -16,7 +16,7 @@ namespace BovineLabs.Spatial.Data
         public IntrinsicKey IntrinsicStore;
     }
 
-    [InternalBufferCapacity(16)]
+    [InternalBufferCapacity(0)]
     public struct SpatialActiveTarget : IBufferElementData, IComparable<SpatialActiveTarget>
     {
         public Entity Target;

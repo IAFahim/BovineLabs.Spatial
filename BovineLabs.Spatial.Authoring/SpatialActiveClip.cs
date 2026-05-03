@@ -6,7 +6,6 @@ using BovineLabs.Spatial.Data;
 using BovineLabs.Timeline.Authoring;
 using BovineLabs.Timeline.EntityLinks.Authoring;
 using Unity.Entities;
-using UnityEngine;
 using UnityEngine.Timeline;
 
 namespace BovineLabs.Spatial.Authoring
@@ -18,7 +17,7 @@ namespace BovineLabs.Spatial.Authoring
         public EntityLinkSchema routeLink;
         public ConditionEventObject onEnter;
         public ConditionEventObject onExit;
-        public IntrinsicSchemaObject intrinsicStore;
+        public IntrinsicSchemaObject stayFrameDuration;
 
         public override double duration => 1;
         public ClipCaps clipCaps => ClipCaps.None;
@@ -35,7 +34,7 @@ namespace BovineLabs.Spatial.Authoring
                 RouteLinkKey = linkKey,
                 OnEnter = onEnter ? onEnter.Key : ConditionKey.Null,
                 OnExit = onExit ? onExit.Key : ConditionKey.Null,
-                IntrinsicStore = intrinsicStore ? intrinsicStore.Key : default
+                IntrinsicStore = stayFrameDuration ? stayFrameDuration.Key : default
             });
 
             context.Baker.AddBuffer<SpatialActiveTarget>(clipEntity);

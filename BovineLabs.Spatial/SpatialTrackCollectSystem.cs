@@ -1,6 +1,7 @@
 using System;
 using BovineLabs.Core.Collections;
 using BovineLabs.Core.Extensions;
+using BovineLabs.Core.Iterators;
 using BovineLabs.Essence;
 using BovineLabs.Essence.Data;
 using BovineLabs.Reaction.Conditions;
@@ -34,8 +35,8 @@ namespace BovineLabs.Spatial
 
         private ComponentLookup<Targets> targetsLookup;
         private ComponentLookup<TargetsCustom> customsLookup;
-        private ComponentLookup<EntityLinkSource> sourcesLookup;
-        private BufferLookup<EntityLinkEntry> linksLookup;
+        private UnsafeComponentLookup<EntityLinkSource> sourcesLookup;
+        private UnsafeBufferLookup<EntityLinkEntry> linksLookup;
         private IntrinsicWriter.Lookup intrinsicWriters;
         private ConditionEventWriter.Lookup eventWriters;
 
@@ -51,8 +52,8 @@ namespace BovineLabs.Spatial
 
             targetsLookup = state.GetComponentLookup<Targets>(true);
             customsLookup = state.GetComponentLookup<TargetsCustom>(true);
-            sourcesLookup = state.GetComponentLookup<EntityLinkSource>(true);
-            linksLookup = state.GetBufferLookup<EntityLinkEntry>(true);
+            sourcesLookup = state.GetUnsafeComponentLookup<EntityLinkSource>(true);
+            linksLookup = state.GetUnsafeBufferLookup<EntityLinkEntry>(true);
 
             intrinsicWriters.Create(ref state);
             eventWriters.Create(ref state);
@@ -146,8 +147,8 @@ namespace BovineLabs.Spatial
             [ReadOnly] public SpatialMaskDatabase MaskDatabase;
             [ReadOnly] public ComponentLookup<Targets> TargetsLookup;
             [ReadOnly] public ComponentLookup<TargetsCustom> CustomsLookup;
-            [ReadOnly] public ComponentLookup<EntityLinkSource> SourcesLookup;
-            [ReadOnly] public BufferLookup<EntityLinkEntry> LinksLookup;
+            [ReadOnly] public UnsafeComponentLookup<EntityLinkSource> SourcesLookup;
+            [ReadOnly] public UnsafeBufferLookup<EntityLinkEntry> LinksLookup;
 
             public NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount>.ParallelWriter IntrinsicChanges;
             public NativeParallelMultiHashMapFallback<Entity, EventAmount>.ParallelWriter EventChanges;
@@ -425,7 +426,7 @@ namespace BovineLabs.Spatial
             public override int GetHashCode() => Event.GetHashCode();
         }
 
-        private static bool TryResolveTarget(Target targetMode, ushort linkKey, Entity self, Entity other, in Targets targets, in ComponentLookup<TargetsCustom> customLookup, in ComponentLookup<EntityLinkSource> sources, in BufferLookup<EntityLinkEntry> links, out Entity resolved)
+        private static bool TryResolveTarget(Target targetMode, ushort linkKey, Entity self, Entity other, in Targets targets, in ComponentLookup<TargetsCustom> customLookup, in UnsafeComponentLookup<EntityLinkSource> sources, in UnsafeBufferLookup<EntityLinkEntry> links, out Entity resolved)
         {
             resolved = Entity.Null;
 
