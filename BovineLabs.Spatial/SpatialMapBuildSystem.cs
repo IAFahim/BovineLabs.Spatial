@@ -53,11 +53,19 @@ namespace BovineLabs.Spatial
         public void OnUpdate(ref SystemState state)
         {
             var collect = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialTrackCollectSystem>();
-            if (collect!= SystemHandle.Null)
+            if (collect != SystemHandle.Null)
             {
                 ref var collectState = ref state.WorldUnmanaged.ResolveSystemStateRef(collect);
                 state.Dependency = JobHandle.CombineDependencies(state.Dependency, collectState.Dependency);
             }
+
+            var heatmap = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialHeatmapSystem>();
+            if (heatmap != SystemHandle.Null)
+            {
+                ref var heatmapState = ref state.WorldUnmanaged.ResolveSystemStateRef(heatmap);
+                state.Dependency = JobHandle.CombineDependencies(state.Dependency, heatmapState.Dependency);
+            }
+
             state.Dependency.Complete();
 
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
@@ -97,6 +105,7 @@ namespace BovineLabs.Spatial
             }.ScheduleParallel(this.targetQuery, JobHandle.CombineDependencies(state.Dependency, baseDep));
 
             state.Dependency = this.map.Build(this.positions.AsDeferredJobArray(), gatherJob);
+            state.Dependency.Complete();
 
             SystemAPI.SetComponent(state.SystemHandle, new SpatialMapSingleton
             {
