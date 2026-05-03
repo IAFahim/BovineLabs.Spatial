@@ -1,35 +1,39 @@
-using System;
-using BovineLabs.Core.Collections;
+// BovineLabs.Spatial/SpatialTrackCollectSystem.cs
+
 using BovineLabs.Core.Extensions;
-using BovineLabs.Core.Iterators;
-using BovineLabs.Essence;
-using BovineLabs.Essence.Data;
-using BovineLabs.Reaction.Conditions;
-using BovineLabs.Reaction.Data.Conditions;
-using BovineLabs.Reaction.Data.Core;
-using BovineLabs.Spatial.Data;
-using BovineLabs.Timeline;
-using BovineLabs.Timeline.Data;
-using BovineLabs.Timeline.EntityLinks;
-using BovineLabs.Timeline.EntityLinks.Data;
-using Unity.Burst;
-using Unity.Burst.CompilerServices;
-using Unity.Collections;
-using Unity.Entities;
-using Unity.Jobs;
-using Unity.Mathematics;
-using Unity.Transforms;
 
 namespace BovineLabs.Spatial
 {
+    using System;
+    using BovineLabs.Core.Collections;
+    using BovineLabs.Core.Spatial;
+    using BovineLabs.Core.Iterators;
+    using BovineLabs.Essence;
+    using BovineLabs.Essence.Data;
+    using BovineLabs.Reaction.Conditions;
+    using BovineLabs.Reaction.Data.Conditions;
+    using BovineLabs.Reaction.Data.Core;
+    using BovineLabs.Spatial.Data;
+    using BovineLabs.Timeline;
+    using BovineLabs.Timeline.Data;
+    using BovineLabs.Timeline.EntityLinks;
+    using BovineLabs.Timeline.EntityLinks.Data;
+    using Unity.Burst;
+    using Unity.Burst.CompilerServices;
+    using Unity.Collections;
+    using Unity.Entities;
+    using Unity.Jobs;
+    using Unity.Mathematics;
+    using Unity.Transforms;
+
     [UpdateInGroup(typeof(TimelineComponentAnimationGroup))]
     [UpdateAfter(typeof(SpatialMapBuildSystem))]
+    [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
+                       WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     public partial struct SpatialTrackCollectSystem : ISystem
     {
         private NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount> intrinsicChanges;
         private NativeParallelMultiHashMapFallback<Entity, EventAmount> eventChanges;
-        private NativeParallelHashSet<Entity> intrinsicTargets;
-        private NativeParallelHashSet<Entity> eventTargets;
         private NativeList<Entity> uniqueKeys;
         private NativeList<Entity> uniqueEventKeys;
 
@@ -37,106 +41,124 @@ namespace BovineLabs.Spatial
         private ComponentLookup<TargetsCustom> customsLookup;
         private UnsafeComponentLookup<EntityLinkSource> sourcesLookup;
         private UnsafeBufferLookup<EntityLinkEntry> linksLookup;
+        private ComponentLookup<LocalTransform> transformLookup;
+        
         private IntrinsicWriter.Lookup intrinsicWriters;
         private ConditionEventWriter.Lookup eventWriters;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            intrinsicChanges = new NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount>(64, Allocator.Persistent);
-            eventChanges = new NativeParallelMultiHashMapFallback<Entity, EventAmount>(64, Allocator.Persistent);
-            intrinsicTargets = new NativeParallelHashSet<Entity>(64, Allocator.Persistent);
-            eventTargets = new NativeParallelHashSet<Entity>(64, Allocator.Persistent);
-            uniqueKeys = new NativeList<Entity>(64, Allocator.Persistent);
-            uniqueEventKeys = new NativeList<Entity>(64, Allocator.Persistent);
+            this.intrinsicChanges = new NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount>(64, Allocator.Persistent);
+            this.eventChanges = new NativeParallelMultiHashMapFallback<Entity, EventAmount>(64, Allocator.Persistent);
+            this.uniqueKeys = new NativeList<Entity>(64, Allocator.Persistent);
+            this.uniqueEventKeys = new NativeList<Entity>(64, Allocator.Persistent);
 
-            targetsLookup = state.GetComponentLookup<Targets>(true);
-            customsLookup = state.GetComponentLookup<TargetsCustom>(true);
-            sourcesLookup = state.GetUnsafeComponentLookup<EntityLinkSource>(true);
-            linksLookup = state.GetUnsafeBufferLookup<EntityLinkEntry>(true);
+            this.targetsLookup = state.GetComponentLookup<Targets>(true);
+            this.customsLookup = state.GetComponentLookup<TargetsCustom>(true);
+            this.sourcesLookup = state.GetUnsafeComponentLookup<EntityLinkSource>(true);
+            this.linksLookup = state.GetUnsafeBufferLookup<EntityLinkEntry>(true);
+            this.transformLookup = state.GetComponentLookup<LocalTransform>(true);
 
-            intrinsicWriters.Create(ref state);
-            eventWriters.Create(ref state);
+            this.intrinsicWriters.Create(ref state);
+            this.eventWriters.Create(ref state);
 
-            state.RequireForUpdate<SpatialMapSingleton>();
             state.RequireForUpdate<SpatialMaskDatabase>();
+            state.RequireForUpdate<SpatialTrackingActive>();
         }
 
         [BurstCompile]
         public void OnDestroy(ref SystemState state)
         {
-            intrinsicChanges.Dispose();
-            eventChanges.Dispose();
-            intrinsicTargets.Dispose();
-            eventTargets.Dispose();
-            uniqueKeys.Dispose();
-            uniqueEventKeys.Dispose();
+            this.intrinsicChanges.Dispose();
+            this.eventChanges.Dispose();
+            this.uniqueKeys.Dispose();
+            this.uniqueEventKeys.Dispose();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            targetsLookup.Update(ref state);
-            customsLookup.Update(ref state);
-            sourcesLookup.Update(ref state);
-            linksLookup.Update(ref state);
-            intrinsicWriters.Update(ref state, SystemAPI.GetSingleton<EssenceConfig>());
-            eventWriters.Update(ref state);
+            var buildSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialMapBuildSystem>();
+            if (!state.EntityManager.HasComponent<SpatialMapSingleton>(buildSystemHandle)) return;
 
-            intrinsicTargets.Clear();
-            eventTargets.Clear();
+            var mapSingleton = state.EntityManager.GetComponentData<SpatialMapSingleton>(buildSystemHandle);
+            if (!mapSingleton.Map.Map.IsCreated) return;
+            
+            this.targetsLookup.Update(ref state);
+            this.customsLookup.Update(ref state);
+            this.sourcesLookup.Update(ref state);
+            this.linksLookup.Update(ref state);
+            this.transformLookup.Update(ref state);
+            
+            this.intrinsicWriters.Update(ref state, SystemAPI.GetSingleton<EssenceConfig>());
+            this.eventWriters.Update(ref state);
 
-            var mapSingleton = SystemAPI.GetSingleton<SpatialMapSingleton>();
             var maskDatabase = SystemAPI.GetSingleton<SpatialMaskDatabase>();
+
+            ref var buildSystem = ref state.WorldUnmanaged.GetUnsafeSystemRef<SpatialMapBuildSystem>(buildSystemHandle);
+            var entitiesArray = buildSystem.Entities.AsArray();
 
             var evalJob = new EvaluateJob
             {
                 MapSingleton = mapSingleton,
+                MapEntities = entitiesArray,
                 MaskDatabase = maskDatabase,
-                TargetsLookup = targetsLookup,
-                CustomsLookup = customsLookup,
-                SourcesLookup = sourcesLookup,
-                LinksLookup = linksLookup,
-                IntrinsicChanges = intrinsicChanges.AsWriter(),
-                EventChanges = eventChanges.AsWriter(),
-                IntrinsicTargets = intrinsicTargets.AsParallelWriter(),
-                EventTargets = eventTargets.AsParallelWriter()
+                TargetsLookup = this.targetsLookup,
+                CustomsLookup = this.customsLookup,
+                SourcesLookup = this.sourcesLookup,
+                LinksLookup = this.linksLookup,
+                TransformLookup = this.transformLookup,
+                IntrinsicChanges = this.intrinsicChanges.AsWriter(),
+                EventChanges = this.eventChanges.AsWriter(),
             };
             
             var exitJob = new ExitJob
             {
-                IntrinsicChanges = intrinsicChanges.AsWriter(),
-                EventChanges = eventChanges.AsWriter(),
-                IntrinsicTargets = intrinsicTargets.AsParallelWriter(),
-                EventTargets = eventTargets.AsParallelWriter()
+                IntrinsicChanges = this.intrinsicChanges.AsWriter(),
+                EventChanges = this.eventChanges.AsWriter(),
             };
 
-            state.Dependency = JobHandle.CombineDependencies(
-                evalJob.ScheduleParallel(state.Dependency),
-                exitJob.ScheduleParallel(state.Dependency));
+            var evalDep = evalJob.ScheduleParallel(state.Dependency);
+            var exitDep = exitJob.ScheduleParallel(evalDep);
 
-            state.Dependency = intrinsicChanges.Apply(state.Dependency, out var intrinsicReader);
-            state.Dependency = eventChanges.Apply(state.Dependency, out var eventReader);
+            var intrinsicApplyDep = this.intrinsicChanges.Apply(exitDep, out var intrinsicReader);
+            var eventApplyDep = this.eventChanges.Apply(exitDep, out var eventReader);
 
-            state.Dependency = new GetKeysJob { UniqueKeys = uniqueKeys, UniqueKeySet = intrinsicTargets }.Schedule(state.Dependency);
-            state.Dependency = new GetKeysJob { UniqueKeys = uniqueEventKeys, UniqueKeySet = eventTargets }.Schedule(state.Dependency);
+            var uniqueIntrinsicDep = new GetUniqueKeysJob<IntrinsicAmount> { Map = intrinsicReader, Keys = this.uniqueKeys }.Schedule(intrinsicApplyDep);
+            var uniqueEventDep = new GetUniqueKeysJob<EventAmount> { Map = eventReader, Keys = this.uniqueEventKeys }.Schedule(eventApplyDep);
 
-            state.Dependency = new ApplyIntrinsicJob
+            var applyIntrinsicDep = new ApplyIntrinsicJob
             {
-                Keys = uniqueKeys,
+                Keys = this.uniqueKeys.AsDeferredJobArray(),
                 GroupChanges = intrinsicReader,
-                IntrinsicWriters = intrinsicWriters
-            }.Schedule(uniqueKeys, 64, state.Dependency);
+                IntrinsicWriters = this.intrinsicWriters
+            }.Schedule(this.uniqueKeys, 64, uniqueIntrinsicDep);
 
-            state.Dependency = new ApplyEventJob
+            var applyEventDep = new ApplyEventJob
             {
-                Keys = uniqueEventKeys,
+                Keys = this.uniqueEventKeys.AsDeferredJobArray(),
                 GroupChanges = eventReader,
-                EventWriters = eventWriters
-            }.Schedule(uniqueEventKeys, 64, state.Dependency);
+                EventWriters = this.eventWriters
+            }.Schedule(this.uniqueEventKeys, 64, JobHandle.CombineDependencies(uniqueEventDep, applyIntrinsicDep));
 
-            state.Dependency = intrinsicChanges.Clear(state.Dependency);
-            state.Dependency = eventChanges.Clear(state.Dependency);
+            var clearIntrinsicDep = this.intrinsicChanges.Clear(applyIntrinsicDep);
+            var clearEventDep = this.eventChanges.Clear(applyEventDep);
+
+            state.Dependency = JobHandle.CombineDependencies(clearIntrinsicDep, clearEventDep);
+        }
+
+        [BurstCompile]
+        private struct GetUniqueKeysJob<T> : IJob
+            where T : unmanaged
+        {
+            public NativeParallelMultiHashMap<Entity, T>.ReadOnly Map;
+            public NativeList<Entity> Keys;
+
+            public void Execute()
+            {
+                BovineLabs.Core.Extensions.NativeParallelMultiHashMapExtensions.GetUniqueKeyArray(this.Map, this.Keys);
+            }
         }
 
         [BurstCompile]
@@ -144,24 +166,26 @@ namespace BovineLabs.Spatial
         private partial struct EvaluateJob : IJobEntity
         {
             [ReadOnly] public SpatialMapSingleton MapSingleton;
+            [ReadOnly] public NativeArray<Entity> MapEntities;
             [ReadOnly] public SpatialMaskDatabase MaskDatabase;
             [ReadOnly] public ComponentLookup<Targets> TargetsLookup;
             [ReadOnly] public ComponentLookup<TargetsCustom> CustomsLookup;
             [ReadOnly] public UnsafeComponentLookup<EntityLinkSource> SourcesLookup;
             [ReadOnly] public UnsafeBufferLookup<EntityLinkEntry> LinksLookup;
+            [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
 
             public NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount>.ParallelWriter IntrinsicChanges;
             public NativeParallelMultiHashMapFallback<Entity, EventAmount>.ParallelWriter EventChanges;
-            public NativeParallelHashSet<Entity>.ParallelWriter IntrinsicTargets;
-            public NativeParallelHashSet<Entity>.ParallelWriter EventTargets;
 
-            private void Execute(Entity clipEntity, in TrackBinding binding, in SpatialActiveClipData clipData, ref DynamicBuffer<SpatialActiveTarget> previous, in LocalTransform casterTransform)
+            private void Execute(Entity clipEntity, in TrackBinding binding, in SpatialActiveClipData clipData, ref DynamicBuffer<SpatialActiveTarget> previous)
             {
-                if (binding.Value == Entity.Null || !MaskDatabase.Blob.Value.Has(clipData.MaskKey)) return;
+                if (binding.Value == Entity.Null || !this.MaskDatabase.Blob.Value.Has(clipData.MaskKey)) return;
+                if (!this.TransformLookup.TryGetComponent(binding.Value, out var casterTransform)) return;
 
                 var currentHits = new NativeList<Entity>(Allocator.Temp);
-                var centerCell = MapSingleton.Map.Quantized(casterTransform.Position.xz - MapSingleton.CameraPos);
-                ref var mask = ref MaskDatabase.Blob.Value.Masks[clipData.MaskKey];
+                
+                var centerCell = this.MapSingleton.Map.Quantized(casterTransform.Position.xz - this.MapSingleton.CameraPos);
+                ref var mask = ref this.MaskDatabase.Blob.Value.Masks[clipData.MaskKey];
 
                 for (var y = 0; y < mask.Size; y++)
                 {
@@ -170,21 +194,21 @@ namespace BovineLabs.Spatial
                         if (mask.Get(x, y) <= 0) continue;
 
                         var cell = centerCell + new int2(x - mask.Size / 2, mask.Size / 2 - y);
-                        var hash = MapSingleton.Map.Hash(cell);
+                        var hash = this.MapSingleton.Map.Hash(cell); 
 
-                        if (!MapSingleton.Map.Map.TryGetFirstValue(hash, out var item, out var it)) continue;
+                        if (!this.MapSingleton.Map.Map.TryGetFirstValue(hash, out var item, out var it)) continue;
 
                         do
                         {
-                            var target = MapSingleton.Entities[item];
-                            var targets = TargetsLookup.HasComponent(binding.Value) ? TargetsLookup[binding.Value] : default;
+                            var target = this.MapEntities[item];
+                            var targets = this.TargetsLookup.HasComponent(binding.Value) ? this.TargetsLookup[binding.Value] : default;
 
-                            if (TryResolveTarget(clipData.RouteTo, clipData.RouteLinkKey, binding.Value, target, targets, CustomsLookup, SourcesLookup, LinksLookup, out var resolved))
+                            if (TryResolveTarget(clipData.RouteTo, clipData.RouteLinkKey, binding.Value, target, targets, this.CustomsLookup, this.SourcesLookup, this.LinksLookup, out var resolved))
                             {
                                 currentHits.Add(resolved);
                             }
 
-                        } while (MapSingleton.Map.Map.TryGetNextValue(out item, ref it));
+                        } while (this.MapSingleton.Map.Map.TryGetNextValue(out item, ref it));
                     }
                 }
 
@@ -205,18 +229,18 @@ namespace BovineLabs.Spatial
                     }
                     else if (p.Index < c.Index || (p.Index == c.Index && p.Version < c.Version))
                     {
-                        FireExit(p, clipData);
+                        this.FireExit(p, clipData);
                         i++;
                     }
                     else
                     {
-                        FireEnter(c, clipData);
+                        this.FireEnter(c, clipData);
                         j++;
                     }
                 }
 
-                while (i < previous.Length) { FireExit(previous[i].Target, clipData); i++; }
-                while (j < uniqueCount) { FireEnter(currentHits[j], clipData); j++; }
+                while (i < previous.Length) { this.FireExit(previous[i].Target, clipData); i++; }
+                while (j < uniqueCount) { this.FireEnter(currentHits[j], clipData); j++; }
 
                 previous.Clear();
                 for (var k = 0; k < uniqueCount; k++) previous.Add(new SpatialActiveTarget { Target = currentHits[k] });
@@ -224,51 +248,29 @@ namespace BovineLabs.Spatial
 
             private static int CompactUnique(NativeList<Entity> entities)
             {
-                if (entities.Length == 0)
-                    return 0;
-
+                if (entities.Length == 0) return 0;
                 var write = 1;
                 var previous = entities[0];
-
                 for (var read = 1; read < entities.Length; read++)
                 {
                     var current = entities[read];
-                    if (current == previous)
-                        continue;
-
+                    if (current == previous) continue;
                     entities[write++] = current;
                     previous = current;
                 }
-
                 return write;
             }
 
             private void FireEnter(Entity e, in SpatialActiveClipData data)
             {
-                if (data.IntrinsicStore.Value != 0)
-                {
-                    IntrinsicChanges.Add(e, new IntrinsicAmount(data.IntrinsicStore, 1));
-                    IntrinsicTargets.Add(e);
-                }
-                if (data.OnEnter != ConditionKey.Null)
-                {
-                    EventChanges.Add(e, new EventAmount(data.OnEnter, 1));
-                    EventTargets.Add(e);
-                }
+                if (data.IntrinsicStore.Value != 0) this.IntrinsicChanges.Add(e, new IntrinsicAmount(data.IntrinsicStore, 1));
+                if (data.OnEnter != ConditionKey.Null) this.EventChanges.Add(e, new EventAmount(data.OnEnter, 1));
             }
 
             private void FireExit(Entity e, in SpatialActiveClipData data)
             {
-                if (data.IntrinsicStore.Value != 0)
-                {
-                    IntrinsicChanges.Add(e, new IntrinsicAmount(data.IntrinsicStore, -1));
-                    IntrinsicTargets.Add(e);
-                }
-                if (data.OnExit != ConditionKey.Null)
-                {
-                    EventChanges.Add(e, new EventAmount(data.OnExit, 1));
-                    EventTargets.Add(e);
-                }
+                if (data.IntrinsicStore.Value != 0) this.IntrinsicChanges.Add(e, new IntrinsicAmount(data.IntrinsicStore, -1));
+                if (data.OnExit != ConditionKey.Null) this.EventChanges.Add(e, new EventAmount(data.OnExit, 1));
             }
         }
 
@@ -279,59 +281,39 @@ namespace BovineLabs.Spatial
         {
             public NativeParallelMultiHashMapFallback<Entity, IntrinsicAmount>.ParallelWriter IntrinsicChanges;
             public NativeParallelMultiHashMapFallback<Entity, EventAmount>.ParallelWriter EventChanges;
-            public NativeParallelHashSet<Entity>.ParallelWriter IntrinsicTargets;
-            public NativeParallelHashSet<Entity>.ParallelWriter EventTargets;
 
             private void Execute(in SpatialActiveClipData clipData, ref DynamicBuffer<SpatialActiveTarget> previous)
             {
                 for (var i = 0; i < previous.Length; i++)
                 {
                     if (clipData.IntrinsicStore.Value != 0)
-                    {
-                        IntrinsicChanges.Add(previous[i].Target, new IntrinsicAmount(clipData.IntrinsicStore, -1));
-                        IntrinsicTargets.Add(previous[i].Target);
-                    }
+                        this.IntrinsicChanges.Add(previous[i].Target, new IntrinsicAmount(clipData.IntrinsicStore, -1));
+                    
                     if (clipData.OnExit != ConditionKey.Null)
-                    {
-                        EventChanges.Add(previous[i].Target, new EventAmount(clipData.OnExit, 1));
-                        EventTargets.Add(previous[i].Target);
-                    }
+                        this.EventChanges.Add(previous[i].Target, new EventAmount(clipData.OnExit, 1));
                 }
                 previous.Clear();
             }
         }
 
         [BurstCompile]
-        private struct GetKeysJob : IJob
-        {
-            public NativeList<Entity> UniqueKeys;
-            [ReadOnly] public NativeParallelHashSet<Entity> UniqueKeySet;
-
-            public void Execute()
-            {
-                UniqueKeys.Clear();
-                foreach (var key in UniqueKeySet) UniqueKeys.Add(key);
-            }
-        }
-
-        [BurstCompile]
         private struct ApplyIntrinsicJob : IJobParallelForDefer
         {
-            [ReadOnly] public NativeList<Entity> Keys;
+            [ReadOnly] public NativeArray<Entity> Keys;
             [ReadOnly] public NativeParallelMultiHashMap<Entity, IntrinsicAmount>.ReadOnly GroupChanges;
             [NativeDisableParallelForRestriction] public IntrinsicWriter.Lookup IntrinsicWriters;
 
             public void Execute(int index)
             {
-                var key = Keys[index];
-                if (Hint.Unlikely(!IntrinsicWriters.TryGet(key, out var writer))) return;
+                var key = this.Keys[index];
+                if (Hint.Unlikely(!this.IntrinsicWriters.TryGet(key, out var writer))) return;
 
                 var values = new FixedList4096Bytes<IntrinsicAmount>();
 
-                if (GroupChanges.TryGetFirstValue(key, out var value, out var it))
+                if (this.GroupChanges.TryGetFirstValue(key, out var value, out var it))
                 {
                     AddOrAccumulate(ref values, value, ref writer);
-                    while (GroupChanges.TryGetNextValue(out value, ref it))
+                    while (this.GroupChanges.TryGetNextValue(out value, ref it))
                         AddOrAccumulate(ref values, value, ref writer);
                 }
 
@@ -351,12 +333,7 @@ namespace BovineLabs.Spatial
                     }
                 }
 
-                if (values.Length < values.Capacity)
-                {
-                    values.Add(value);
-                    return;
-                }
-
+                if (values.Length < values.Capacity) { values.Add(value); return; }
                 writer.Add(value.Intrinsic, value.Amount);
             }
         }
@@ -364,21 +341,21 @@ namespace BovineLabs.Spatial
         [BurstCompile]
         private struct ApplyEventJob : IJobParallelForDefer
         {
-            [ReadOnly] public NativeList<Entity> Keys;
+            [ReadOnly] public NativeArray<Entity> Keys;
             [ReadOnly] public NativeParallelMultiHashMap<Entity, EventAmount>.ReadOnly GroupChanges;
             [NativeDisableParallelForRestriction] public ConditionEventWriter.Lookup EventWriters;
 
             public void Execute(int index)
             {
-                var key = Keys[index];
-                if (Hint.Unlikely(!EventWriters.TryGet(key, out var writer))) return;
+                var key = this.Keys[index];
+                if (Hint.Unlikely(!this.EventWriters.TryGet(key, out var writer))) return;
 
                 var values = new FixedList4096Bytes<EventAmount>();
 
-                if (GroupChanges.TryGetFirstValue(key, out var value, out var it))
+                if (this.GroupChanges.TryGetFirstValue(key, out var value, out var it))
                 {
                     AddOrAccumulate(ref values, value, ref writer);
-                    while (GroupChanges.TryGetNextValue(out value, ref it))
+                    while (this.GroupChanges.TryGetNextValue(out value, ref it))
                         AddOrAccumulate(ref values, value, ref writer);
                 }
 
@@ -398,12 +375,7 @@ namespace BovineLabs.Spatial
                     }
                 }
 
-                if (values.Length < values.Capacity)
-                {
-                    values.Add(value);
-                    return;
-                }
-
+                if (values.Length < values.Capacity) { values.Add(value); return; }
                 writer.Trigger(value.Event, value.Amount);
             }
         }
@@ -412,18 +384,18 @@ namespace BovineLabs.Spatial
         {
             public readonly IntrinsicKey Intrinsic;
             public int Amount;
-            public IntrinsicAmount(IntrinsicKey intrinsic, int amount) { Intrinsic = intrinsic; Amount = amount; }
-            public bool Equals(IntrinsicAmount other) => Intrinsic.Equals(other.Intrinsic);
-            public override int GetHashCode() => Intrinsic.GetHashCode();
+            public IntrinsicAmount(IntrinsicKey intrinsic, int amount) { this.Intrinsic = intrinsic; this.Amount = amount; }
+            public bool Equals(IntrinsicAmount other) => this.Intrinsic.Equals(other.Intrinsic);
+            public override int GetHashCode() => this.Intrinsic.GetHashCode();
         }
 
         private struct EventAmount : IEquatable<EventAmount>
         {
             public readonly ConditionKey Event;
             public int Amount;
-            public EventAmount(ConditionKey evt, int amount) { Event = evt; Amount = amount; }
-            public bool Equals(EventAmount other) => Event.Equals(other.Event);
-            public override int GetHashCode() => Event.GetHashCode();
+            public EventAmount(ConditionKey evt, int amount) { this.Event = evt; this.Amount = amount; }
+            public bool Equals(EventAmount other) => this.Event.Equals(other.Event);
+            public override int GetHashCode() => this.Event.GetHashCode();
         }
 
         private static bool TryResolveTarget(Target targetMode, ushort linkKey, Entity self, Entity other, in Targets targets, in ComponentLookup<TargetsCustom> customLookup, in UnsafeComponentLookup<EntityLinkSource> sources, in UnsafeBufferLookup<EntityLinkEntry> links, out Entity resolved)

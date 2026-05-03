@@ -1,14 +1,15 @@
-using System.Collections.Generic;
-using BovineLabs.Core.Authoring.Settings;
-using BovineLabs.Core.Settings;
-using BovineLabs.Spatial.Authoring;
-using BovineLabs.Spatial.Data;
-using Unity.Collections;
-using Unity.Entities;
-using UnityEngine;
-
+// BovineLabs.Spatial.Authoring/Settings/SpatialGridSettings.cs
 namespace BovineLabs.Spatial.Settings
 {
+    using System.Collections.Generic;
+    using BovineLabs.Core.Authoring.Settings;
+    using BovineLabs.Core.Settings;
+    using BovineLabs.Spatial.Authoring;
+    using BovineLabs.Spatial.Data;
+    using Unity.Collections;
+    using Unity.Entities;
+    using UnityEngine;
+
     [SettingsGroup("Spatial")]
     public sealed class SpatialGridSettings : SettingsBase
     {
@@ -26,18 +27,22 @@ namespace BovineLabs.Spatial.Settings
             var entity = baker.GetEntity(TransformUsageFlags.None);
             var blob = CreateMaskDatabaseBlob();
             baker.AddBlobAsset(ref blob, out _);
+            
             baker.AddComponent(entity, new SpatialMaskDatabase { Blob = blob });
             baker.AddComponent(entity, new SpatialFocusedMap
             {
-                CellSize = cellSize,
-                Size = activeMapSize,
+                CellSize = this.cellSize,
+                Size = this.activeMapSize,
             });
             baker.AddBuffer<SpatialNeighbors>(entity);
+            
+            // Allow tracking
+            baker.AddComponent<SpatialTrackingActive>(entity);
         }
 
         private BlobAssetReference<SpatialMaskDatabaseBlob> CreateMaskDatabaseBlob()
         {
-            var masks = ValidMasks();
+            var masks = this.ValidMasks();
             var builder = new BlobBuilder(Allocator.Temp);
             ref var root = ref builder.ConstructRoot<SpatialMaskDatabaseBlob>();
             var entries = builder.Allocate(ref root.Masks, MaskArrayLength(masks));
@@ -63,7 +68,7 @@ namespace BovineLabs.Spatial.Settings
             var result = new List<SpatialMaskAsset>();
             var keys = new HashSet<ushort>();
 
-            foreach (var mask in schemas)
+            foreach (var mask in this.schemas)
             {
                 if (mask == null || mask.Id == 0)
                     continue;

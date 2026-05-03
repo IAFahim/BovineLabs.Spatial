@@ -1,18 +1,18 @@
+// BovineLabs.Spatial.Debug/SpatialTrackDebugSystem.cs
 #if UNITY_EDITOR || BL_DEBUG
-using BovineLabs.Core;
-using BovineLabs.Quill;
-using BovineLabs.Spatial.Data;
-using BovineLabs.Timeline.Data;
-using Unity.Burst;
-using Unity.Collections;
-using Unity.Entities;
-using Unity.Jobs;
-using Unity.Mathematics;
-using Unity.Transforms;
-using UnityEngine;
-
 namespace BovineLabs.Spatial.Debug
 {
+    using BovineLabs.Core;
+    using BovineLabs.Quill;
+    using BovineLabs.Spatial.Data;
+    using Unity.Burst;
+    using Unity.Collections;
+    using Unity.Entities;
+    using Unity.Jobs;
+    using Unity.Mathematics;
+    using Unity.Transforms;
+    using UnityEngine;
+
     [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
                        WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     [UpdateInGroup(typeof(DebugSystemGroup))]
@@ -26,10 +26,19 @@ namespace BovineLabs.Spatial.Debug
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            var heatmapSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialHeatmapSystem>();
+            if (!state.EntityManager.HasComponent<SpatialHeatmapSingleton>(heatmapSystemHandle)) return;
+
+            var heatmap = state.EntityManager.GetComponentData<SpatialHeatmapSingleton>(heatmapSystemHandle);
+            if (!heatmap.Map.IsCreated) return;
+
+            var buildSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialMapBuildSystem>();
+            if (!state.EntityManager.HasComponent<SpatialMapSingleton>(buildSystemHandle)) return;
+
+            var mapSingleton = state.EntityManager.GetComponentData<SpatialMapSingleton>(buildSystemHandle);
+
             var drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer();
-            var mapSingleton = SystemAPI.GetSingleton<SpatialMapSingleton>();
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
-            var maskDatabase = SystemAPI.GetSingleton<SpatialMaskDatabase>();
 
             state.Dependency = new DrawGridJob
             {
@@ -38,11 +47,12 @@ namespace BovineLabs.Spatial.Debug
                 Focus = focus
             }.Schedule(state.Dependency);
 
-            state.Dependency = new DrawMasksJob
+            state.Dependency = new DrawHeatmapJob
             {
                 Drawer = drawer,
                 MapSingleton = mapSingleton,
-                MaskDatabase = maskDatabase
+                Focus = focus,
+                Heatmap = heatmap.Map
             }.Schedule(state.Dependency);
 
             state.Dependency = new DrawTargetsJob
@@ -60,60 +70,64 @@ namespace BovineLabs.Spatial.Debug
 
             public void Execute()
             {
-                var cam = new float3(MapSingleton.CameraPos.x, 0, MapSingleton.CameraPos.y);
-                var extent = Focus.Size * Focus.CellSize;
+                var cam = new float3(this.MapSingleton.CameraPos.x, 0, this.MapSingleton.CameraPos.y);
+                var physicalSize = (int)math.ceil(this.Focus.Size * this.Focus.CellSize);
+                var extent = physicalSize;
                 var half = extent * 0.5f;
                 var min = cam - new float3(half, 0, half);
                 var max = cam + new float3(half, 0, half);
                 var color = new Color(0.4f, 0.4f, 0.4f, 0.1f);
-                var step = Focus.CellSize;
+                var step = this.Focus.CellSize;
 
-                for (var x = 0; x <= Focus.Size; x++)
+                for (var x = 0; x <= this.Focus.Size; x++)
                 {
                     var px = min.x + x * step;
-                    Drawer.Line(new float3(px, 0, min.z), new float3(px, 0, max.z), color);
+                    this.Drawer.Line(new float3(px, 0, min.z), new float3(px, 0, max.z), color);
                 }
 
-                for (var z = 0; z <= Focus.Size; z++)
+                for (var z = 0; z <= this.Focus.Size; z++)
                 {
                     var pz = min.z + z * step;
-                    Drawer.Line(new float3(min.x, 0, pz), new float3(max.x, 0, pz), color);
+                    this.Drawer.Line(new float3(min.x, 0, pz), new float3(max.x, 0, pz), color);
                 }
 
                 var origin = new float3(cam.x, 0, cam.z);
-                Drawer.Point(origin, step * 0.5f, new Color(1f, 1f, 0f, 0.8f));
+                this.Drawer.Point(origin, step * 0.5f, new Color(1f, 1f, 0f, 0.8f));
             }
         }
 
         [BurstCompile]
-        [WithAll(typeof(ClipActive))]
-        private partial struct DrawMasksJob : IJobEntity
+        private struct DrawHeatmapJob : IJob
         {
             public Drawer Drawer;
             [ReadOnly] public SpatialMapSingleton MapSingleton;
-            [ReadOnly] public SpatialMaskDatabase MaskDatabase;
+            [ReadOnly] public SpatialFocusedMap Focus;
+            [ReadOnly] public NativeParallelHashMap<int, int> Heatmap;
 
-            private void Execute(in SpatialActiveClipData clipData, in LocalTransform transform)
+            public void Execute()
             {
-                if (!MaskDatabase.Blob.Value.Has(clipData.MaskKey)) return;
-                
-                var centerCell = MapSingleton.Map.Quantized(transform.Position.xz - MapSingleton.CameraPos);
-                ref var mask = ref MaskDatabase.Blob.Value.Masks[clipData.MaskKey];
-                
-                var cellSize = new float3(MapSingleton.CellSize, 0, MapSingleton.CellSize) * 0.95f;
+                var physicalSize = (int)math.ceil(this.Focus.Size * this.Focus.CellSize);
+                var quantizeSize = (int)math.ceil(physicalSize / this.Focus.CellSize);
+                var halfSize = new float2(physicalSize) / 2f;
+                var cellSize = new float3(this.Focus.CellSize, 0, this.Focus.CellSize) * 0.95f;
 
-                for (var y = 0; y < mask.Size; y++)
+                foreach (var kvp in this.Heatmap)
                 {
-                    for (var x = 0; x < mask.Size; x++)
-                    {
-                        if (mask.Get(x, y) <= 0) continue;
+                    var hash = kvp.Key;
+                    var weight = kvp.Value;
 
-                        var cell = centerCell + new int2(x - mask.Size / 2, mask.Size / 2 - y);
-                        var wposXZ = (float2)cell * MapSingleton.CellSize + MapSingleton.CameraPos + MapSingleton.CellSize * 0.5f;
-                        var wpos = new float3(wposXZ.x, 0, wposXZ.y);
+                    var x = hash % quantizeSize;
+                    var y = hash / quantizeSize;
 
-                        Drawer.Cuboid(wpos, quaternion.identity, cellSize, new Color(0.8f, 0.2f, 0.2f, 0.3f));
-                    }
+                    var cell = new int2(x, y);
+                    var focusCellSize = new float2(cell.x, cell.y) * this.Focus.CellSize;
+                    var wposXZ = focusCellSize - halfSize + this.MapSingleton.CameraPos + (this.Focus.CellSize * 0.5f);
+                    var wpos = new float3(wposXZ.x, 0, wposXZ.y);
+
+                    var alpha = math.clamp(weight / 5f, 0.2f, 0.9f);
+                    var color = new Color(1f, 0.2f, 0.2f, alpha);
+
+                    this.Drawer.Cuboid(wpos, quaternion.identity, cellSize, color);
                 }
             }
         }
@@ -126,7 +140,7 @@ namespace BovineLabs.Spatial.Debug
 
             private void Execute(in LocalTransform transform)
             {
-                Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
+                this.Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
             }
         }
     }

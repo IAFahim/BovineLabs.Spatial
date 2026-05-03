@@ -5,6 +5,7 @@ using UnityEngine;
 namespace BovineLabs.Spatial.Authoring
 {
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(BovineLabs.Core.Authoring.TransformAuthoring))]
     public class SpatialTargetAuthoring : MonoBehaviour
     {
         private class Baker : Baker<SpatialTargetAuthoring>
