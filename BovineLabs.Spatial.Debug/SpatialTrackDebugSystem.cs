@@ -21,10 +21,6 @@ namespace BovineLabs.Spatial.Debug
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            state.RequireForUpdate<DrawSystem.Singleton>();
-            state.RequireForUpdate<SpatialMapSingleton>();
-            state.RequireForUpdate<SpatialFocusedMap>();
-            state.RequireForUpdate<SpatialMaskDatabase>();
         }
 
         [BurstCompile]
@@ -65,8 +61,27 @@ namespace BovineLabs.Spatial.Debug
             public void Execute()
             {
                 var cam = new float3(MapSingleton.CameraPos.x, 0, MapSingleton.CameraPos.y);
-                var boundsSize = new float3(Focus.Size * Focus.CellSize, 0, Focus.Size * Focus.CellSize);
-                Drawer.Cuboid(cam, quaternion.identity, boundsSize, new Color(0.2f, 0.2f, 0.2f, 0.1f));
+                var extent = Focus.Size * Focus.CellSize;
+                var half = extent * 0.5f;
+                var min = cam - new float3(half, 0, half);
+                var max = cam + new float3(half, 0, half);
+                var color = new Color(0.4f, 0.4f, 0.4f, 0.1f);
+                var step = Focus.CellSize;
+
+                for (var x = 0; x <= Focus.Size; x++)
+                {
+                    var px = min.x + x * step;
+                    Drawer.Line(new float3(px, 0, min.z), new float3(px, 0, max.z), color);
+                }
+
+                for (var z = 0; z <= Focus.Size; z++)
+                {
+                    var pz = min.z + z * step;
+                    Drawer.Line(new float3(min.x, 0, pz), new float3(max.x, 0, pz), color);
+                }
+
+                var origin = new float3(cam.x, 0, cam.z);
+                Drawer.Point(origin, step * 0.5f, new Color(1f, 1f, 0f, 0.8f));
             }
         }
 

@@ -10,8 +10,6 @@ namespace BovineLabs.Spatial.Data
 
     public struct SpatialFocusedMap : IComponentData
     {
-        public float3 Center;
-        public int2 CenterCell;
         public float CellSize;
         public int Size;
     }

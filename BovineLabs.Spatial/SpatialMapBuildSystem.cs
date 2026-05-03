@@ -13,6 +13,8 @@ using Unity.Transforms;
 namespace BovineLabs.Spatial
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
+                       WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     public partial struct SpatialMapBuildSystem : ISystem
     {
         private SpatialMap<SpatialPosition> map;
@@ -25,7 +27,7 @@ namespace BovineLabs.Spatial
         public void OnCreate(ref SystemState state)
         {
             targetQuery = SystemAPI.QueryBuilder().WithAll<SpatialTarget, LocalTransform>().Build();
-            cameraQuery = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalTransform>().Build();
+            cameraQuery = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalToWorld>().Build();
             positions = new NativeList<SpatialPosition>(Allocator.Persistent);
             entities = new NativeList<Entity>(Allocator.Persistent);
             state.RequireForUpdate<SpatialFocusedMap>();
@@ -42,6 +44,8 @@ namespace BovineLabs.Spatial
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            state.Dependency.Complete();
+
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
 
             if (!map.IsCreated)
@@ -52,7 +56,17 @@ namespace BovineLabs.Spatial
 
             var camPos = float2.zero;
             if (!cameraQuery.IsEmpty)
-                camPos = cameraQuery.GetSingleton<LocalTransform>().Position.xz;
+            {
+                var ltw = cameraQuery.GetSingleton<LocalToWorld>();
+                var origin = ltw.Position;
+                var forward = ltw.Forward;
+                if (math.abs(forward.y) > 1e-6f)
+                {
+                    var t = -origin.y / forward.y;
+                    if (t > 0)
+                        camPos = (origin + forward * t).xz;
+                }
+            }
 
             var count = targetQuery.CalculateEntityCount();
             positions.ResizeUninitialized(count);
@@ -69,6 +83,7 @@ namespace BovineLabs.Spatial
             }.ScheduleParallel(targetQuery, JobHandle.CombineDependencies(state.Dependency, baseDep));
 
             state.Dependency = map.Build(positions.AsDeferredJobArray(), gatherJob);
+            state.Dependency.Complete();
 
             SystemAPI.SetComponent(state.SystemHandle, new SpatialMapSingleton
             {

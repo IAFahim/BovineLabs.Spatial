@@ -19,9 +19,6 @@ namespace BovineLabs.Spatial.Settings
         [Header("Mask Schemas")]
         [SerializeField] private List<SpatialMaskAsset> schemas = new();
 
-        public float CellSize => cellSize;
-        public int ActiveMapSize => activeMapSize;
-
         public IReadOnlyList<SpatialMaskAsset> Schemas => schemas;
 
         public override void Bake(Baker<SettingsAuthoring> baker)
