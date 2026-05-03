@@ -14,6 +14,7 @@ namespace BovineLabs.Spatial.Data
         public ConditionKey OnEnter;
         public ConditionKey OnExit;
         public IntrinsicKey IntrinsicStore;
+        public uint TargetLayer;
     }
 
     [InternalBufferCapacity(0)]
