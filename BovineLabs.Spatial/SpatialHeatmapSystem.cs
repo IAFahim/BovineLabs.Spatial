@@ -112,10 +112,10 @@ namespace BovineLabs.Spatial
                     for (var x = 0; x < mask.Size; x++)
                     {
                         var weight = mask.Get(x, y);
-                        if (weight <= 0) continue;
+                        if (weight == 0) continue; // <-- was <=0, now keeps negatives
 
                         var cell = centerCell + new int2(x - mask.Size / 2, mask.Size / 2 - y);
-                        var hash = this.MapSingleton.Map.Hash(cell); 
+                        var hash = this.MapSingleton.Map.Hash(cell);
 
                         this.MultiMap.Add(hash, weight);
                     }

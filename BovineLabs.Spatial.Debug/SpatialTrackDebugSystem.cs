@@ -1,4 +1,5 @@
 // BovineLabs.Spatial.Debug/SpatialTrackDebugSystem.cs
+
 #if UNITY_EDITOR || BL_DEBUG
 namespace BovineLabs.Spatial.Debug
 {
@@ -39,6 +40,30 @@ namespace BovineLabs.Spatial.Debug
 
             var drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer();
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
+
+            var vis = SystemAPI.HasSingleton<SpatialDebugVisualization>()
+                ? SystemAPI.GetSingleton<SpatialDebugVisualization>()
+                : new SpatialDebugVisualization
+                {
+                    Mode = VisualizationMode.CubeHeight, Palette = ColorPalette.CoolWarm, HeightScale = 0.9f,
+                    Opacity = 0.85f, ShowGrid = 1, ShowNegativeBelow = 1
+                };
+
+            if (vis.ShowGrid != 0)
+            {
+                state.Dependency =
+                    new DrawGridJob { Drawer = drawer, MapSingleton = mapSingleton, Focus = focus }.Schedule(
+                        state.Dependency);
+            }
+
+            state.Dependency = new DrawHeatmapJob
+            {
+                Drawer = drawer,
+                MapSingleton = mapSingleton,
+                Focus = focus,
+                Heatmap = heatmap.Map,
+                Vis = vis
+            }.Schedule(state.Dependency);
 
             state.Dependency = new DrawGridJob
             {
@@ -103,46 +128,96 @@ namespace BovineLabs.Spatial.Debug
             [ReadOnly] public SpatialMapSingleton MapSingleton;
             [ReadOnly] public SpatialFocusedMap Focus;
             [ReadOnly] public NativeParallelHashMap<int, int> Heatmap;
+            public SpatialDebugVisualization Vis;
 
             public void Execute()
             {
-                var physicalSize = (int)math.ceil(this.Focus.Size * this.Focus.CellSize);
-                var quantizeSize = (int)math.ceil(physicalSize / this.Focus.CellSize);
+                if (Heatmap.IsEmpty) return;
+
+                var physicalSize = (int)math.ceil(Focus.Size * Focus.CellSize);
+                var quantizeSize = (int)math.ceil(physicalSize / Focus.CellSize);
                 var halfSize = new float2(physicalSize) / 2f;
-                var cellSize = new float3(this.Focus.CellSize, 0, this.Focus.CellSize) * 0.95f;
 
-                foreach (var kvp in this.Heatmap)
+                int maxAbs = 1;
+                foreach (var kvp in Heatmap) maxAbs = math.max(maxAbs, math.abs(kvp.Value));
+
+                foreach (var kvp in Heatmap)
                 {
-                    var hash = kvp.Key;
                     var weight = kvp.Value;
+                    if (weight == 0) continue;
 
-                    var x = hash % quantizeSize;
-                    var y = hash / quantizeSize;
+                    var x = kvp.Key % quantizeSize;
+                    var y = kvp.Key / quantizeSize;
+                    var wposXZ = (float2)new int2(x, y) * Focus.CellSize - halfSize + MapSingleton.CameraPos +
+                                 Focus.CellSize * 0.5f;
 
-                    var cell = new int2(x, y);
-                    var focusCellSize = new float2(cell.x, cell.y) * this.Focus.CellSize;
-                    var wposXZ = focusCellSize - halfSize + this.MapSingleton.CameraPos + (this.Focus.CellSize * 0.5f);
-                    var wpos = new float3(wposXZ.x, 0, wposXZ.y);
+                    float t = math.clamp((float)weight / maxAbs, -1f, 1f);
+                    float absT = math.abs(t);
 
-                    var alpha = math.clamp(weight / 5f, 0.2f, 0.9f);
-                    var color = new Color(1f, 0.2f, 0.2f, alpha);
+                    // choose size based on mode
+                    float3 size;
+                    float yPos = 0f;
+                    switch (Vis.Mode)
+                    {
+                        case VisualizationMode.FlatPlate:
+                            size = new float3(Focus.CellSize * 0.95f, Vis.PlateThickness, Focus.CellSize * 0.95f);
+                            yPos = 0;
+                            break;
+                        case VisualizationMode.Pillar:
+                            size = new float3(Focus.CellSize * 0.25f, absT * Focus.CellSize * Vis.HeightScale,
+                                Focus.CellSize * 0.25f);
+                            yPos = Vis.ShowNegativeBelow != 0 && weight < 0 ? -size.y * 0.5f : size.y * 0.5f;
+                            break;
+                        case VisualizationMode.AxisTint:
+                            size = new float3(Focus.CellSize * 0.98f, 0.002f, Focus.CellSize * 0.98f);
+                            yPos = 0.001f;
+                            break;
+                        case VisualizationMode.WireCube:
+                        default: // CubeHeight
+                            var h = absT * Focus.CellSize * Vis.HeightScale;
+                            size = new float3(Focus.CellSize * 0.85f, math.max(0.02f, h), Focus.CellSize * 0.85f);
+                            yPos = Vis.ShowNegativeBelow != 0 && weight < 0 ? -size.y * 0.5f : size.y * 0.5f;
+                            break;
+                    }
 
-                    this.Drawer.Cuboid(wpos, quaternion.identity, cellSize, color);
+                    var color = GetPalette(Vis.Palette, t);
+                    color.a = Vis.Opacity * (Vis.Mode == VisualizationMode.WireCube ? 0.3f : 1f);
+
+                    Drawer.Cuboid(new float3(wposXZ.x, yPos, wposXZ.y), quaternion.identity, size, color);
                 }
             }
-        }
 
-        [BurstCompile]
-        [WithAll(typeof(SpatialTarget))]
-        private partial struct DrawTargetsJob : IJobEntity
-        {
-            public Drawer Drawer;
-
-            private void Execute(in LocalToWorld transform)
+            private static Color GetPalette(ColorPalette p, float t)
             {
-                this.Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
+                float u = math.saturate((t + 1f) * 0.5f); // 0..1
+                return p switch
+                {
+                    ColorPalette.CoolWarm => new Color(math.lerp(0.23f, 0.71f, u),
+                        math.lerp(0.30f, 0.02f, math.abs(u - 0.5f) * 2), math.lerp(0.75f, 0.15f, 1 - u)),
+                    ColorPalette.Viridis => new Color(0.27f + 0.72f * u, 0.0f + 0.9f * math.pow(u, 0.5f),
+                        0.33f + 0.67f * u * u),
+                    ColorPalette.Inferno => new Color(math.pow(u, 0.7f), math.pow(u, 1.5f) * 0.5f, u * u * 0.2f),
+                    ColorPalette.Jet => new Color(math.clamp(1.5f - math.abs(4 * u - 3), 0, 1),
+                        math.clamp(1.5f - math.abs(4 * u - 2), 0, 1), math.clamp(1.5f - math.abs(4 * u - 1), 0, 1)),
+                    ColorPalette.Turbo => new Color(0.19f + 0.81f * u, 0.3f + 0.7f * math.sin(u * 3.14f),
+                        0.9f - 0.8f * u),
+                    _ => new Color(u, u, u)
+                };
             }
         }
     }
+
+    [BurstCompile]
+    [WithAll(typeof(SpatialTarget))]
+    public partial struct DrawTargetsJob : IJobEntity
+    {
+        public Drawer Drawer;
+
+        private void Execute(in LocalToWorld transform)
+        {
+            this.Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
+        }
+    }
 }
+
 #endif

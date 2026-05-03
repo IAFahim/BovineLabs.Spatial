@@ -20,6 +20,15 @@ namespace BovineLabs.Spatial.Settings
         [Header("Mask Schemas")]
         [SerializeField] private List<SpatialMaskAsset> schemas = new();
 
+        [Header("Debug Visualization")]
+        [SerializeField] private VisualizationMode visMode = VisualizationMode.CubeHeight;
+        [SerializeField] private ColorPalette palette = ColorPalette.CoolWarm;
+        [SerializeField, Range(0.1f, 2f)] private float heightScale = 0.9f;
+        [SerializeField, Range(0.01f, 0.2f)] private float plateThickness = 0.05f;
+        [SerializeField, Range(0.1f, 1f)] private float opacity = 0.85f;
+        [SerializeField] private bool showGrid = true;
+        [SerializeField] private bool showNegativeBelow = true;
+
         public IReadOnlyList<SpatialMaskAsset> Schemas => schemas;
 
         public override void Bake(Baker<SettingsAuthoring> baker)
@@ -38,6 +47,17 @@ namespace BovineLabs.Spatial.Settings
             
             // Allow tracking
             baker.AddComponent<SpatialTrackingActive>(entity);
+            
+            baker.AddComponent(entity, new SpatialDebugVisualization
+            {
+                Mode = visMode,
+                Palette = palette,
+                HeightScale = heightScale,
+                PlateThickness = plateThickness,
+                Opacity = opacity,
+                ShowGrid = (byte)(showGrid? 1 : 0),
+                ShowNegativeBelow = (byte)(showNegativeBelow? 1 : 0)
+            });
         }
 
         private BlobAssetReference<SpatialMaskDatabaseBlob> CreateMaskDatabaseBlob(IBaker baker)

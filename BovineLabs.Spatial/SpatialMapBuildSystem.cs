@@ -16,6 +16,7 @@ namespace BovineLabs.Spatial
     [UpdateInGroup(typeof(SimulationSystemGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
                        WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
+    [UpdateAfter(typeof(SpatialTrackCollectSystem))]
     public partial struct SpatialMapBuildSystem : ISystem
     {
         private SpatialMap<SpatialPosition> map;
@@ -51,6 +52,12 @@ namespace BovineLabs.Spatial
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            // var collect = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialTrackCollectSystem>();
+            // if (collect!= SystemHandle.Null)
+            // {
+            //     ref var collectState = ref state.WorldUnmanaged.ResolveSystemStateRef(collect);
+            //     state.Dependency = JobHandle.CombineDependencies(state.Dependency, collectState.Dependency);
+            // }
             state.Dependency.Complete();
 
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
