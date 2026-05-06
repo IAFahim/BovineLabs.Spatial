@@ -14,7 +14,7 @@ namespace BovineLabs.Spatial.Data
 
         public bool Has(ushort key)
         {
-            return key < this.Masks.Length && this.Masks[key].Values.Length != 0;
+            return key < Masks.Length && Masks[key].Values.Length != 0;
         }
     }
 
@@ -22,12 +22,12 @@ namespace BovineLabs.Spatial.Data
     {
         public BlobArray<sbyte> Values;
 
-        public int Size => (int)math.sqrt(this.Values.Length);
+        public int Size => (int)math.sqrt(Values.Length);
 
         public sbyte Get(int x, int y)
         {
-            var size = this.Size;
-            return x < 0 || y < 0 || x >= size || y >= size ? (sbyte)0 : this.Values[x + y * size];
+            var size = Size;
+            return x < 0 || y < 0 || x >= size || y >= size ? (sbyte)0 : Values[x + y * size];
         }
     }
 }

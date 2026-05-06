@@ -19,6 +19,7 @@ namespace BovineLabs.Spatial.Authoring
         public ConditionEventObject onEnter;
         public ConditionEventObject onExit;
         public IntrinsicSchemaObject stayFrameDuration;
+
         [Tooltip("Bitmask of influence layer flags. e.g. 1=Danger, 2=Desire, 4=Density")]
         public uint targetLayer = 1;
 
@@ -38,7 +39,7 @@ namespace BovineLabs.Spatial.Authoring
                 OnEnter = onEnter ? onEnter.Key : ConditionKey.Null,
                 OnExit = onExit ? onExit.Key : ConditionKey.Null,
                 IntrinsicStore = stayFrameDuration ? stayFrameDuration.Key : default,
-                TargetLayer = targetLayer,
+                TargetLayer = targetLayer
             });
 
             context.Baker.AddBuffer<SpatialActiveTarget>(clipEntity);

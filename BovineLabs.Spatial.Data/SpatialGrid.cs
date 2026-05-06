@@ -1,6 +1,5 @@
 using BovineLabs.Core.PhysicsStates;
 using Unity.Entities;
-using Unity.Mathematics;
 
 namespace BovineLabs.Spatial.Data
 {
@@ -21,6 +20,4 @@ namespace BovineLabs.Spatial.Data
         public sbyte XOffset;
         public sbyte YOffset;
     }
-    
-    
 }

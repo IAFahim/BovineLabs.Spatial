@@ -14,16 +14,14 @@ namespace BovineLabs.Spatial.Authoring
         private const int MinSize = 1;
         private const int MaxSize = 31;
 
-        [SerializeField]
-        [InspectorReadOnly]
-        private ushort id;
+        [SerializeField] [InspectorReadOnly] private ushort id;
 
-        [SerializeField, HideInInspector] private int width = 3;
-        [SerializeField, HideInInspector] private int height = 3;
+        [SerializeField] [HideInInspector] private int width = 3;
+        [SerializeField] [HideInInspector] private int height = 3;
 
         // Unity serializes byte[] safely.
         // Runtime reads each value as signed sbyte using unchecked cast.
-        [SerializeField, HideInInspector] private byte[] values = new byte[9];
+        [SerializeField] [HideInInspector] private byte[] values = new byte[9];
 
         public ushort Id => id;
         public ushort Key => id;
@@ -32,6 +30,13 @@ namespace BovineLabs.Spatial.Authoring
         public int Height => height;
         public int CenterX => width / 2;
         public int CenterY => height / 2;
+
+        private void OnValidate()
+        {
+            width = SanitizeSize(width);
+            height = SanitizeSize(height);
+            EnsureArray();
+        }
 
         int IUID.ID
         {
@@ -51,13 +56,6 @@ namespace BovineLabs.Spatial.Authoring
         public static implicit operator ushort(SpatialMaskAsset mask)
         {
             return mask == null ? (ushort)0 : mask.id;
-        }
-
-        private void OnValidate()
-        {
-            width = SanitizeSize(width);
-            height = SanitizeSize(height);
-            EnsureArray();
         }
 
         public sbyte Get(int x, int y)
@@ -180,10 +178,8 @@ namespace BovineLabs.Spatial.Authoring
 
             var count = 0;
             for (var i = 0; i < values.Length; i++)
-            {
                 if (unchecked((sbyte)values[i]) != 0)
                     count++;
-            }
 
             return count;
         }

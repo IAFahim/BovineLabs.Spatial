@@ -1,7 +1,7 @@
+using Unity.Entities;
+
 namespace BovineLabs.Spatial.Data
 {
-    using Unity.Entities;
-
     public enum VisualizationMode : byte
     {
         CubeHeight, // height = |value|, classic

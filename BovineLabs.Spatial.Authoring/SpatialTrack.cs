@@ -9,6 +9,5 @@ namespace BovineLabs.Spatial.Authoring
     [DisplayName("BovineLabs/Spatial/SpatialTrack")]
     public sealed class SpatialTrack : DOTSTrack
     {
-        
     }
 }

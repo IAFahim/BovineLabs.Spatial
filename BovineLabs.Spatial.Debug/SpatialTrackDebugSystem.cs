@@ -1,19 +1,19 @@
 // BovineLabs.Spatial.Debug/SpatialTrackDebugSystem.cs
 
+using BovineLabs.Core;
+using BovineLabs.Quill;
+using BovineLabs.Spatial.Data;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Entities;
+using Unity.Jobs;
+using Unity.Mathematics;
+using Unity.Transforms;
+using UnityEngine;
+
 #if UNITY_EDITOR || BL_DEBUG
 namespace BovineLabs.Spatial.Debug
 {
-    using BovineLabs.Core;
-    using BovineLabs.Quill;
-    using BovineLabs.Spatial.Data;
-    using Unity.Burst;
-    using Unity.Collections;
-    using Unity.Entities;
-    using Unity.Jobs;
-    using Unity.Mathematics;
-    using Unity.Transforms;
-    using UnityEngine;
-
     [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
                        WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     [UpdateInGroup(typeof(DebugSystemGroup))]
@@ -50,11 +50,9 @@ namespace BovineLabs.Spatial.Debug
                 };
 
             if (vis.ShowGrid != 0)
-            {
                 state.Dependency =
                     new DrawGridJob { Drawer = drawer, MapSingleton = mapSingleton, Focus = focus }.Schedule(
                         state.Dependency);
-            }
 
             state.Dependency = new DrawHeatmapJob
             {
@@ -95,29 +93,29 @@ namespace BovineLabs.Spatial.Debug
 
             public void Execute()
             {
-                var cam = new float3(this.MapSingleton.CameraPos.x, 0, this.MapSingleton.CameraPos.y);
-                var physicalSize = (int)math.ceil(this.Focus.Size * this.Focus.CellSize);
+                var cam = new float3(MapSingleton.CameraPos.x, 0, MapSingleton.CameraPos.y);
+                var physicalSize = (int)math.ceil(Focus.Size * Focus.CellSize);
                 var extent = physicalSize;
                 var half = extent * 0.5f;
                 var min = cam - new float3(half, 0, half);
                 var max = cam + new float3(half, 0, half);
                 var color = new Color(0.4f, 0.4f, 0.4f, 0.1f);
-                var step = this.Focus.CellSize;
+                var step = Focus.CellSize;
 
-                for (var x = 0; x <= this.Focus.Size; x++)
+                for (var x = 0; x <= Focus.Size; x++)
                 {
                     var px = min.x + x * step;
-                    this.Drawer.Line(new float3(px, 0, min.z), new float3(px, 0, max.z), color);
+                    Drawer.Line(new float3(px, 0, min.z), new float3(px, 0, max.z), color);
                 }
 
-                for (var z = 0; z <= this.Focus.Size; z++)
+                for (var z = 0; z <= Focus.Size; z++)
                 {
                     var pz = min.z + z * step;
-                    this.Drawer.Line(new float3(min.x, 0, pz), new float3(max.x, 0, pz), color);
+                    Drawer.Line(new float3(min.x, 0, pz), new float3(max.x, 0, pz), color);
                 }
 
                 var origin = new float3(cam.x, 0, cam.z);
-                this.Drawer.Point(origin, step * 0.5f, new Color(1f, 1f, 0f, 0.8f));
+                Drawer.Point(origin, step * 0.5f, new Color(1f, 1f, 0f, 0.8f));
             }
         }
 
@@ -138,7 +136,7 @@ namespace BovineLabs.Spatial.Debug
                 var quantizeSize = (int)math.ceil(physicalSize / Focus.CellSize);
                 var halfSize = new float2(physicalSize) / 2f;
 
-                int maxAbs = 1;
+                var maxAbs = 1;
                 foreach (var kvp in Heatmap) maxAbs = math.max(maxAbs, math.abs(kvp.Value));
 
                 foreach (var kvp in Heatmap)
@@ -151,11 +149,11 @@ namespace BovineLabs.Spatial.Debug
                     var wposXZ = (float2)new int2(x, y) * Focus.CellSize - halfSize + MapSingleton.CameraPos +
                                  Focus.CellSize * 0.5f;
 
-                    float t = math.clamp((float)weight / maxAbs, -1f, 1f);
-                    float absT = math.abs(t);
-                    
+                    var t = math.clamp((float)weight / maxAbs, -1f, 1f);
+                    var absT = math.abs(t);
+
                     float3 size;
-                    float yPos = 0f;
+                    var yPos = 0f;
                     switch (Vis.Mode)
                     {
                         case VisualizationMode.FlatPlate:
@@ -188,7 +186,7 @@ namespace BovineLabs.Spatial.Debug
 
             private static Color GetPalette(ColorPalette p, float t)
             {
-                float u = math.saturate((t + 1f) * 0.5f); // 0..1
+                var u = math.saturate((t + 1f) * 0.5f); // 0..1
                 return p switch
                 {
                     ColorPalette.CoolWarm => new Color(math.lerp(0.23f, 0.71f, u),
@@ -214,7 +212,7 @@ namespace BovineLabs.Spatial.Debug
 
         private void Execute(in LocalToWorld transform)
         {
-            this.Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
+            Drawer.Point(new float3(transform.Position.x, 0, transform.Position.z), 0.1f, Color.cyan);
         }
     }
 }

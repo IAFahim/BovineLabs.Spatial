@@ -1,7 +1,6 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
-using BovineLabs.Spatial.Authoring;
 using UnityEditor;
 using UnityEngine;
 
@@ -20,16 +19,16 @@ namespace BovineLabs.Spatial.Authoring.Editor
         private static readonly int[] Sizes = { 1, 3, 5, 7, 9, 11, 15 };
         private static readonly string[] WriteModeNames = Enum.GetNames(typeof(SpatialMaskWriteMode));
         private static readonly string[] SizeNames = { "1x1", "3x3", "5x5", "7x7", "9x9", "11x11", "15x15" };
+        private readonly List<int> orderedSelection = new();
 
         private readonly HashSet<int> selection = new();
-        private readonly List<int> orderedSelection = new();
-        private SpatialMaskAsset asset;
-        private int brush = 1;
         private int anchorX;
         private int anchorY;
-        private Rect gridRect;
-        private Vector2 dataScroll;
+        private SpatialMaskAsset asset;
+        private int brush = 1;
         private bool dataExpanded = true;
+        private Vector2 dataScroll;
+        private Rect gridRect;
         private SpatialMaskShape shape = SpatialMaskShape.ForwardCone;
         private SpatialMaskWriteMode writeMode = SpatialMaskWriteMode.Replace;
 
@@ -74,8 +73,11 @@ namespace BovineLabs.Spatial.Authoring.Editor
         {
             var stats = SpatialMaskStats.From(asset);
             var selected = HasSelection ? $"Sel {selection.Count}  Sum {FormatSigned(SelectionSum())}" : "Sel none";
-            EditorGUILayout.LabelField($"{asset.Width}x{asset.Height}  Center ({asset.CenterX},{asset.CenterY})  Active {stats.Active}/{stats.Count}  Sum {FormatSigned(stats.Sum)}  Min {FormatSigned(stats.Min)}  Max {FormatSigned(stats.Max)}", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField($"{selected}  Brush {FormatSigned(brush)}  Shape {shape}  {writeMode}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(
+                $"{asset.Width}x{asset.Height}  Center ({asset.CenterX},{asset.CenterY})  Active {stats.Active}/{stats.Count}  Sum {FormatSigned(stats.Sum)}  Min {FormatSigned(stats.Min)}  Max {FormatSigned(stats.Max)}",
+                EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"{selected}  Brush {FormatSigned(brush)}  Shape {shape}  {writeMode}",
+                EditorStyles.miniLabel);
         }
 
         private void DrawBrush()
@@ -121,7 +123,8 @@ namespace BovineLabs.Spatial.Authoring.Editor
             if (EditorGUI.EndChangeCheck())
                 Repaint();
 
-            writeMode = (SpatialMaskWriteMode)GUI.Toolbar(Slice(ref row, modeWidth), (int)writeMode, WriteModeNames, EditorStyles.miniButton);
+            writeMode = (SpatialMaskWriteMode)GUI.Toolbar(Slice(ref row, modeWidth), (int)writeMode, WriteModeNames,
+                EditorStyles.miniButton);
 
             if (Button(ref row, "Apply", buttonWidth, EditorStyles.miniButton))
                 ApplyShape();
@@ -473,7 +476,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
             var bounds = SelectionBounds();
             var lines = new List<string>
             {
-                $"{ClipboardHeader}\t{bounds.width}\t{bounds.height}",
+                $"{ClipboardHeader}\t{bounds.width}\t{bounds.height}"
             };
 
             for (var i = 0; i < orderedSelection.Count; i++)
@@ -511,7 +514,8 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 if (parts.Length < 3)
                     continue;
 
-                if (!int.TryParse(parts[0], out var rx) || !int.TryParse(parts[1], out var ry) || !int.TryParse(parts[2], out var value))
+                if (!int.TryParse(parts[0], out var rx) || !int.TryParse(parts[1], out var ry) ||
+                    !int.TryParse(parts[2], out var value))
                     continue;
 
                 var x = anchor.x + rx;
@@ -574,10 +578,8 @@ namespace BovineLabs.Spatial.Authoring.Editor
 
             for (var y = minY; y <= maxY; y++)
             for (var x = minX; x <= maxX; x++)
-            {
                 if (asset.IsInside(x, y))
                     selection.Add(Key(x, y));
-            }
         }
 
         private void ToggleSelection(int x, int y)
@@ -796,7 +798,9 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 SpatialMaskShape.Surround => max == 1 ? value * sign : 0,
                 SpatialMaskShape.Square => max <= radius ? Falloff(value, max, radius) * sign : 0,
                 SpatialMaskShape.Diamond => manhattan <= radius ? Falloff(value, manhattan, radius) * sign : 0,
-                SpatialMaskShape.Disc => sqr <= radius * radius ? Falloff(value, Mathf.RoundToInt(Mathf.Sqrt(sqr)), radius) * sign : 0,
+                SpatialMaskShape.Disc => sqr <= radius * radius
+                    ? Falloff(value, Mathf.RoundToInt(Mathf.Sqrt(sqr)), radius) * sign
+                    : 0,
                 SpatialMaskShape.Ring => max == radius ? value * sign : 0,
                 SpatialMaskShape.Cross => dx == 0 || dz == 0 ? Falloff(value, max, radius) * sign : 0,
                 SpatialMaskShape.DiagonalCross => absX == absZ ? Falloff(value, max, radius) * sign : 0,
@@ -809,7 +813,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 SpatialMaskShape.LeftFlank => dx < 0 && absZ <= absX ? Falloff(value, absX, radius) * sign : 0,
                 SpatialMaskShape.RightFlank => dx > 0 && absZ <= absX ? Falloff(value, absX, radius) * sign : 0,
                 SpatialMaskShape.RepelRing => max == radius ? -value : 0,
-                _ => 0,
+                _ => 0
             };
         }
 
@@ -828,7 +832,8 @@ namespace BovineLabs.Spatial.Authoring.Editor
         private int CellSize()
         {
             var available = Mathf.Max(100f, EditorGUIUtility.currentViewWidth - 26f);
-            var fit = Mathf.FloorToInt((available - Mathf.Max(0, asset.Width - 1) * CellGap) / Mathf.Max(1, asset.Width));
+            var fit = Mathf.FloorToInt(
+                (available - Mathf.Max(0, asset.Width - 1) * CellGap) / Mathf.Max(1, asset.Width));
             return Mathf.Clamp(fit, CellMin, CellMax);
         }
 
@@ -863,10 +868,8 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 return -1;
 
             for (var i = 0; i < Sizes.Length; i++)
-            {
                 if (Sizes[i] == width)
                     return i;
-            }
 
             return -1;
         }
@@ -878,7 +881,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 alignment = TextAnchor.MiddleCenter,
                 clipping = TextClipping.Clip,
                 wordWrap = false,
-                fontSize = height <= 18 ? 8 : 9,
+                fontSize = height <= 18 ? 8 : 9
             };
 
             style.normal.textColor = TextColor(value);
@@ -998,7 +1001,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
                 6 => Color.gray6,
                 7 => Color.gray7,
                 8 => Color.gray8,
-                _ => Color.gray9,
+                _ => Color.gray9
             };
         }
 
@@ -1056,7 +1059,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
         private enum SpatialMaskWriteMode
         {
             Replace,
-            Add,
+            Add
         }
 
         private enum SpatialMaskShape
@@ -1077,7 +1080,7 @@ namespace BovineLabs.Spatial.Authoring.Editor
             RearCone,
             LeftFlank,
             RightFlank,
-            RepelRing,
+            RepelRing
         }
     }
 }
