@@ -17,20 +17,20 @@ namespace BovineLabs.Spatial
                        WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     public partial struct SpatialMapBuildSystem : ISystem
     {
-        private SpatialMap<SpatialPosition> map;
-        private NativeList<SpatialPosition> positions;
+        private SpatialMap<SpatialPosition> _map;
+        private NativeList<SpatialPosition> _positions;
 
         public NativeList<Entity> Entities;
 
-        private EntityQuery targetQuery;
-        private EntityQuery cameraQuery;
+        private EntityQuery _targetQuery;
+        private EntityQuery _cameraQuery;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            targetQuery = SystemAPI.QueryBuilder().WithAll<SpatialTarget, LocalToWorld>().Build();
-            cameraQuery = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalToWorld>().Build();
-            positions = new NativeList<SpatialPosition>(Allocator.Persistent);
+            _targetQuery = SystemAPI.QueryBuilder().WithAll<SpatialTarget, LocalToWorld>().Build();
+            _cameraQuery = SystemAPI.QueryBuilder().WithAll<CameraMain, LocalToWorld>().Build();
+            _positions = new NativeList<SpatialPosition>(Allocator.Persistent);
             Entities = new NativeList<Entity>(Allocator.Persistent);
 
             state.EntityManager.AddComponent<SpatialMapSingleton>(state.SystemHandle);
@@ -42,8 +42,8 @@ namespace BovineLabs.Spatial
         [BurstCompile]
         public void OnDestroy(ref SystemState state)
         {
-            if (map.IsCreated) map.Dispose();
-            positions.Dispose();
+            if (_map.IsCreated) _map.Dispose();
+            _positions.Dispose();
             Entities.Dispose();
         }
 
@@ -69,12 +69,12 @@ namespace BovineLabs.Spatial
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
             var physicalSize = (int)math.ceil(focus.Size * focus.CellSize);
 
-            if (!map.IsCreated) map = new SpatialMap<SpatialPosition>(focus.CellSize, physicalSize);
+            if (!_map.IsCreated) _map = new SpatialMap<SpatialPosition>(focus.CellSize, physicalSize);
 
             var camPos = float2.zero;
-            if (!cameraQuery.IsEmpty)
+            if (!_cameraQuery.IsEmpty)
             {
-                var ltw = cameraQuery.GetSingleton<LocalToWorld>();
+                var ltw = _cameraQuery.GetSingleton<LocalToWorld>();
                 var origin = ltw.Position;
                 var forward = ltw.Forward;
                 if (math.abs(forward.y) > 1e-6f)
@@ -85,27 +85,27 @@ namespace BovineLabs.Spatial
                 }
             }
 
-            var count = targetQuery.CalculateEntityCount();
-            positions.ResizeUninitialized(count);
+            var count = _targetQuery.CalculateEntityCount();
+            _positions.ResizeUninitialized(count);
             Entities.ResizeUninitialized(count);
 
             var gatherJob = new GatherJob
             {
                 CameraPos = camPos,
-                Positions = positions.AsArray(),
+                Positions = _positions.AsArray(),
                 Entities = Entities.AsArray(),
                 TransformHandle = SystemAPI.GetComponentTypeHandle<LocalToWorld>(true),
                 EntityHandle = SystemAPI.GetEntityTypeHandle(),
-                BaseIndices = targetQuery.CalculateBaseEntityIndexArrayAsync(state.WorldUpdateAllocator,
+                BaseIndices = _targetQuery.CalculateBaseEntityIndexArrayAsync(state.WorldUpdateAllocator,
                     state.Dependency, out var baseDep)
-            }.ScheduleParallel(targetQuery, JobHandle.CombineDependencies(state.Dependency, baseDep));
+            }.ScheduleParallel(_targetQuery, JobHandle.CombineDependencies(state.Dependency, baseDep));
 
-            state.Dependency = map.Build(positions.AsDeferredJobArray(), gatherJob);
+            state.Dependency = _map.Build(_positions.AsDeferredJobArray(), gatherJob);
             state.Dependency.Complete();
 
             SystemAPI.SetComponent(state.SystemHandle, new SpatialMapSingleton
             {
-                Map = map.AsReadOnly(),
+                Map = _map.AsReadOnly(),
                 CameraPos = camPos,
                 CellSize = focus.CellSize
             });
