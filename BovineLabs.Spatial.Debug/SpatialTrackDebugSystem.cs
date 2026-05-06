@@ -1,5 +1,3 @@
-// BovineLabs.Spatial.Debug/SpatialTrackDebugSystem.cs
-
 using BovineLabs.Core;
 using BovineLabs.Quill;
 using BovineLabs.Spatial.Data;
@@ -38,7 +36,9 @@ namespace BovineLabs.Spatial.Debug
 
             var mapSingleton = state.EntityManager.GetComponentData<SpatialMapSingleton>(buildSystemHandle);
 
-            var drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer();
+            var drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer<SpatialTrackDebugSystem>();
+            if (!drawer.IsEnabled) return;
+            
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
 
             var vis = SystemAPI.HasSingleton<SpatialDebugVisualization>()
@@ -170,7 +170,7 @@ namespace BovineLabs.Spatial.Debug
                             yPos = 0.001f;
                             break;
                         case VisualizationMode.WireCube:
-                        default: // CubeHeight
+                        default:
                             var h = absT * Focus.CellSize * Vis.HeightScale;
                             size = new float3(Focus.CellSize * 0.85f, math.max(0.02f, h), Focus.CellSize * 0.85f);
                             yPos = Vis.ShowNegativeBelow != 0 && weight < 0 ? -size.y * 0.5f : size.y * 0.5f;
@@ -186,7 +186,7 @@ namespace BovineLabs.Spatial.Debug
 
             private static Color GetPalette(ColorPalette p, float t)
             {
-                var u = math.saturate((t + 1f) * 0.5f); // 0..1
+                var u = math.saturate((t + 1f) * 0.5f);
                 return p switch
                 {
                     ColorPalette.CoolWarm => new Color(math.lerp(0.23f, 0.71f, u),
