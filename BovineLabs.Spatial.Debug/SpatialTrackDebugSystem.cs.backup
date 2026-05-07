@@ -14,23 +14,6 @@ using UnityEngine;
 
 namespace BovineLabs.Spatial.Debug
 {
-    [Configurable]
-    [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:Element parameters should be documented",
-        Justification = "Using see cref")]
-    public static class SpatialTrackDebugSystemConfig
-    {
-        private const string DrawForced = "spatialtrackdebugsystem.force-draw";
-        private const string DrawGlobalDescEnabled = "Enable the drawer in the editor.";
-
-        [ConfigVar(DrawForced, false, DrawGlobalDescEnabled)]
-        internal static readonly SharedStatic<bool> Enabled =
-            SharedStatic<bool>.GetOrCreate<SpatialTrackDebugSystemForced>();
-
-        private struct SpatialTrackDebugSystemForced
-        {
-        }
-    }
-
     [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
                        WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     [UpdateInGroup(typeof(DebugSystemGroup))]
@@ -56,13 +39,8 @@ namespace BovineLabs.Spatial.Debug
 
             var mapSingleton = state.EntityManager.GetComponentData<SpatialMapSingleton>(buildSystemHandle);
 
-            Drawer drawer;
-            if (!SpatialTrackDebugSystemConfig.Enabled.Data)
-            {
-                drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer<SpatialTrackDebugSystem>();
-                if (!drawer.IsEnabled) return;
-            }
-            else drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer();
+            var drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer<SpatialTrackDebugSystem>();
+            if (!drawer.IsEnabled) return;
             
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
 
