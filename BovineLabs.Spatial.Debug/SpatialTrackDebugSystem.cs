@@ -34,15 +34,14 @@ namespace BovineLabs.Spatial.Debug
     [WorldSystemFilter(WorldSystemFilterFlags.LocalSimulation | WorldSystemFilterFlags.ServerSimulation |
                        WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.Editor)]
     [UpdateInGroup(typeof(DebugSystemGroup))]
-    [BurstCompile]
     public partial struct SpatialTrackDebugSystem : ISystem
     {
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
+            state.RequireForUpdate<DrawSystem.Singleton>();
         }
 
-        [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             var heatmapSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialHeatmapSystem>();
@@ -56,13 +55,16 @@ namespace BovineLabs.Spatial.Debug
 
             var mapSingleton = state.EntityManager.GetComponentData<SpatialMapSingleton>(buildSystemHandle);
 
+            if (!SystemAPI.HasSingleton<DrawSystem.Singleton>()) return;
+            ref var drawSystem = ref SystemAPI.GetSingletonRW<DrawSystem.Singleton>().ValueRW;
+
             Drawer drawer;
             if (!SpatialTrackDebugSystemConfig.Enabled.Data)
             {
-                drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer<SpatialTrackDebugSystem>();
+                drawer = drawSystem.CreateDrawer<SpatialTrackDebugSystem>();
                 if (!drawer.IsEnabled) return;
             }
-            else drawer = SystemAPI.GetSingleton<DrawSystem.Singleton>().CreateDrawer();
+            else drawer = drawSystem.CreateDrawer();
             
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
 
