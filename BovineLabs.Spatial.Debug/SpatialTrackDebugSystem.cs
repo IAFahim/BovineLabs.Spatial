@@ -63,21 +63,6 @@ namespace BovineLabs.Spatial.Debug
                 Vis = vis
             }.Schedule(state.Dependency);
 
-            state.Dependency = new DrawGridJob
-            {
-                Drawer = drawer,
-                MapSingleton = mapSingleton,
-                Focus = focus
-            }.Schedule(state.Dependency);
-
-            state.Dependency = new DrawHeatmapJob
-            {
-                Drawer = drawer,
-                MapSingleton = mapSingleton,
-                Focus = focus,
-                Heatmap = heatmap.Map
-            }.Schedule(state.Dependency);
-
             state.Dependency = new DrawTargetsJob
             {
                 Drawer = drawer
