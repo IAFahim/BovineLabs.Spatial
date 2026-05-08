@@ -2,6 +2,7 @@
 using System.Diagnostics.CodeAnalysis;
 using BovineLabs.Core;
 using BovineLabs.Core.ConfigVars;
+using BovineLabs.Core.Iterators;
 using BovineLabs.Quill;
 using BovineLabs.Spatial.Data;
 using Unity.Burst;
@@ -44,11 +45,15 @@ namespace BovineLabs.Spatial.Debug
 
         public void OnUpdate(ref SystemState state)
         {
-            var heatmapSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialHeatmapSystem>();
-            if (!state.EntityManager.HasComponent<SpatialHeatmapSingleton>(heatmapSystemHandle)) return;
+            if (!SystemAPI.HasSingleton<SpatialHeatmapSingleton>()) return;
 
-            var heatmap = state.EntityManager.GetComponentData<SpatialHeatmapSingleton>(heatmapSystemHandle);
-            if (!heatmap.Map.IsCreated) return;
+            // Get the DynamicBuffer-backed hashmap from the singleton entity
+            var heatmapEntity = SystemAPI.GetSingletonEntity<SpatialHeatmapSingleton>();
+            if (!state.EntityManager.HasBuffer<SpatialHeatmapBuffer>(heatmapEntity)) return;
+            var heatmapBuffer = state.EntityManager.GetBuffer<SpatialHeatmapBuffer>(heatmapEntity);
+            if (heatmapBuffer.Length == 0) return;
+            var heatmap = heatmapBuffer.AsHashMap<SpatialHeatmapBuffer, int, int>();
+            if (heatmap.IsEmpty) return;
 
             var buildSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialMapBuildSystem>();
             if (!state.EntityManager.HasComponent<SpatialMapSingleton>(buildSystemHandle)) return;
@@ -86,7 +91,7 @@ namespace BovineLabs.Spatial.Debug
                 Drawer = drawer,
                 MapSingleton = mapSingleton,
                 Focus = focus,
-                Heatmap = heatmap.Map,
+                HeatmapBuffer = heatmapBuffer,
                 Vis = vis
             }.Schedule(state.Dependency);
 
@@ -137,21 +142,22 @@ namespace BovineLabs.Spatial.Debug
             public Drawer Drawer;
             [ReadOnly] public SpatialMapSingleton MapSingleton;
             [ReadOnly] public SpatialFocusedMap Focus;
-            [ReadOnly] public NativeParallelHashMap<int, int> Heatmap;
+            public DynamicBuffer<SpatialHeatmapBuffer> HeatmapBuffer;
             public SpatialDebugVisualization Vis;
 
             public void Execute()
             {
-                if (Heatmap.IsEmpty) return;
+                var heatmap = HeatmapBuffer.AsHashMap<SpatialHeatmapBuffer, int, int>();
+                if (heatmap.IsEmpty) return;
 
                 var physicalSize = (int)math.ceil(Focus.Size * Focus.CellSize);
                 var quantizeSize = (int)math.ceil(physicalSize / Focus.CellSize);
                 var halfSize = new float2(physicalSize) / 2f;
 
                 var maxAbs = 1;
-                foreach (var kvp in Heatmap) maxAbs = math.max(maxAbs, math.abs(kvp.Value));
+                foreach (var kvp in heatmap) maxAbs = math.max(maxAbs, math.abs(kvp.Value));
 
-                foreach (var kvp in Heatmap)
+                foreach (var kvp in heatmap)
                 {
                     var weight = kvp.Value;
                     if (weight == 0) continue;

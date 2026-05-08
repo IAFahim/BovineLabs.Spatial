@@ -1,3 +1,4 @@
+using BovineLabs.Core.Iterators;
 using BovineLabs.Spatial.Data;
 using BovineLabs.Timeline;
 using BovineLabs.Timeline.Data;
@@ -18,21 +19,23 @@ namespace BovineLabs.Spatial
     public partial struct SpatialHeatmapSystem : ISystem
     {
         private NativeParallelMultiHashMap<int, int> multiMap;
-        private NativeParallelHashMap<int, int> heatmap;
         private NativeList<int> uniqueKeys;
 
         private ComponentLookup<LocalToWorld> transformLookup;
+        private BufferLookup<SpatialHeatmapBuffer> heatmapBufferLookup;
+        private Entity systemEntity;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             multiMap = new NativeParallelMultiHashMap<int, int>(1024, Allocator.Persistent);
-            heatmap = new NativeParallelHashMap<int, int>(1024, Allocator.Persistent);
             uniqueKeys = new NativeList<int>(1024, Allocator.Persistent);
 
             transformLookup = state.GetComponentLookup<LocalToWorld>(true);
+            heatmapBufferLookup = state.GetBufferLookup<SpatialHeatmapBuffer>(false);
 
             state.EntityManager.AddComponent<SpatialHeatmapSingleton>(state.SystemHandle);
+            systemEntity = Entity.Null;
 
             state.RequireForUpdate<SpatialMaskDatabase>();
             state.RequireForUpdate<SpatialTrackingActive>();
@@ -42,13 +45,20 @@ namespace BovineLabs.Spatial
         public void OnDestroy(ref SystemState state)
         {
             multiMap.Dispose();
-            heatmap.Dispose();
             uniqueKeys.Dispose();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            // Lazy-init: add the heatmap buffer to the system entity on first available frame
+            if (systemEntity == Entity.Null)
+            {
+                systemEntity = SystemAPI.GetSingletonEntity<SpatialHeatmapSingleton>();
+                state.EntityManager.AddBuffer<SpatialHeatmapBuffer>(systemEntity);
+                heatmapBufferLookup.Update(ref state);
+            }
+
             var buildSystemHandle = state.WorldUnmanaged.GetExistingUnmanagedSystem<SpatialMapBuildSystem>();
             if (!state.EntityManager.HasComponent<SpatialMapSingleton>(buildSystemHandle)) return;
 
@@ -56,13 +66,11 @@ namespace BovineLabs.Spatial
             if (!mapSingleton.Map.Map.IsCreated) return;
 
             multiMap.Clear();
-            heatmap.Clear();
 
             var maskDatabase = SystemAPI.GetSingleton<SpatialMaskDatabase>();
 
-            SystemAPI.SetComponent(state.SystemHandle, new SpatialHeatmapSingleton { Map = heatmap });
-
             transformLookup.Update(ref state);
+            heatmapBufferLookup.Update(ref state);
 
             var gatherJob = new GatherHeatmapJob
             {
@@ -82,8 +90,9 @@ namespace BovineLabs.Spatial
             {
                 Keys = uniqueKeys.AsDeferredJobArray(),
                 MultiMap = multiMap.AsReadOnly(),
-                Heatmap = heatmap.AsParallelWriter()
-            }.Schedule(uniqueKeys, 64, keysJob);
+                HeatmapBuffers = heatmapBufferLookup,
+                SystemEntity = systemEntity
+            }.Schedule(keysJob);
         }
 
         [BurstCompile]
@@ -131,24 +140,42 @@ namespace BovineLabs.Spatial
         }
 
         [BurstCompile]
-        private struct ReduceHeatmapJob : IJobParallelForDefer
+        private struct ReduceHeatmapJob : IJob
         {
             [ReadOnly] public NativeArray<int> Keys;
             [ReadOnly] public NativeParallelMultiHashMap<int, int>.ReadOnly MultiMap;
-            public NativeParallelHashMap<int, int>.ParallelWriter Heatmap;
+            public BufferLookup<SpatialHeatmapBuffer> HeatmapBuffers;
+            public Entity SystemEntity;
 
-            public void Execute(int index)
+            public void Execute()
             {
-                var key = Keys[index];
-                var sum = 0;
+                if (!HeatmapBuffers.TryGetBuffer(SystemEntity, out var buffer)) return;
 
-                if (MultiMap.TryGetFirstValue(key, out var value, out var it))
+                // Clear or initialize the DynamicBuffer-backed hashmap
+                if (buffer.Length > 0)
                 {
-                    sum += value;
-                    while (MultiMap.TryGetNextValue(out value, ref it)) sum += value;
+                    buffer.AsHashMap<SpatialHeatmapBuffer, int, int>().Clear();
+                }
+                else
+                {
+                    buffer.InitializeHashMap<SpatialHeatmapBuffer, int, int>(1024);
                 }
 
-                Heatmap.TryAdd(key, sum);
+                var map = buffer.AsHashMap<SpatialHeatmapBuffer, int, int>();
+
+                for (var index = 0; index < Keys.Length; index++)
+                {
+                    var key = Keys[index];
+                    var sum = 0;
+
+                    if (MultiMap.TryGetFirstValue(key, out var value, out var it))
+                    {
+                        sum += value;
+                        while (MultiMap.TryGetNextValue(out value, ref it)) sum += value;
+                    }
+
+                    map.TryAdd(key, sum);
+                }
             }
         }
     }
