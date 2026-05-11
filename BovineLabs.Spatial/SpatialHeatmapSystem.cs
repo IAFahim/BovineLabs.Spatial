@@ -32,7 +32,7 @@ namespace BovineLabs.Spatial
             uniqueKeys = new NativeList<int>(1024, Allocator.Persistent);
 
             transformLookup = state.GetComponentLookup<LocalToWorld>(true);
-            heatmapBufferLookup = state.GetBufferLookup<SpatialHeatmapBuffer>(false);
+            heatmapBufferLookup = state.GetBufferLookup<SpatialHeatmapBuffer>();
 
             state.EntityManager.AddComponent<SpatialHeatmapSingleton>(state.SystemHandle);
             systemEntity = Entity.Null;
@@ -153,13 +153,9 @@ namespace BovineLabs.Spatial
 
                 // Clear or initialize the DynamicBuffer-backed hashmap
                 if (buffer.Length > 0)
-                {
                     buffer.AsHashMap<SpatialHeatmapBuffer, int, int>().Clear();
-                }
                 else
-                {
                     buffer.InitializeHashMap<SpatialHeatmapBuffer, int, int>(1024);
-                }
 
                 var map = buffer.AsHashMap<SpatialHeatmapBuffer, int, int>();
 

@@ -69,8 +69,11 @@ namespace BovineLabs.Spatial.Debug
                 drawer = drawSystem.CreateDrawer<SpatialTrackDebugSystem>();
                 if (!drawer.IsEnabled) return;
             }
-            else drawer = drawSystem.CreateDrawer();
-            
+            else
+            {
+                drawer = drawSystem.CreateDrawer();
+            }
+
             var focus = SystemAPI.GetSingleton<SpatialFocusedMap>();
 
             var vis = SystemAPI.HasSingleton<SpatialDebugVisualization>()
