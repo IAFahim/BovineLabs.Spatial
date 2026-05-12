@@ -14,7 +14,9 @@
     "Unity.Collections",
     "Unity.Entities",
     "Unity.Mathematics",
-    "Unity.Transforms"
+    "Unity.Transforms",
+    "BovineLabs.Quill.Grid.Data",
+    "FireAlt.BLinq"
   ],
   "includePlatforms": [
     "Editor"
