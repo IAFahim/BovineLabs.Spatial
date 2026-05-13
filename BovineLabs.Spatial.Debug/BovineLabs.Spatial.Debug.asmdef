@@ -16,7 +16,8 @@
     "Unity.Mathematics",
     "Unity.Transforms",
     "BovineLabs.Quill.Grid.Data",
-    "FireAlt.BLinq"
+    "FireAlt.BLinq",
+    "BovineLabs.Quill.Grid.Debug"
   ],
   "includePlatforms": [
     "Editor"

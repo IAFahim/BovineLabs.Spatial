@@ -47,7 +47,6 @@ namespace BovineLabs.Spatial.Debug
         {
             if (!SystemAPI.HasSingleton<SpatialHeatmapSingleton>()) return;
 
-            // Get the DynamicBuffer-backed hashmap from the singleton entity
             var heatmapEntity = SystemAPI.GetSingletonEntity<SpatialHeatmapSingleton>();
             if (!state.EntityManager.HasBuffer<SpatialHeatmapBuffer>(heatmapEntity)) return;
             var heatmapBuffer = state.EntityManager.GetBuffer<SpatialHeatmapBuffer>(heatmapEntity);
