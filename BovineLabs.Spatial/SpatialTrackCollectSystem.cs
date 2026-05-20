@@ -35,7 +35,6 @@ namespace BovineLabs.Spatial
         private NativeList<Entity> _uniqueEventKeys;
 
         private ComponentLookup<Targets> _targetsLookup;
-        private ComponentLookup<TargetsCustom> _customsLookup;
         private UnsafeComponentLookup<EntityLinkSource> _sourcesLookup;
         private UnsafeBufferLookup<EntityLinkEntry> _linksLookup;
         private ComponentLookup<LocalToWorld> _transformLookup;
@@ -53,7 +52,6 @@ namespace BovineLabs.Spatial
             _uniqueEventKeys = new NativeList<Entity>(64, Allocator.Persistent);
 
             _targetsLookup = state.GetComponentLookup<Targets>(true);
-            _customsLookup = state.GetComponentLookup<TargetsCustom>(true);
             _sourcesLookup = state.GetUnsafeComponentLookup<EntityLinkSource>(true);
             _linksLookup = state.GetUnsafeBufferLookup<EntityLinkEntry>(true);
             _transformLookup = state.GetComponentLookup<LocalToWorld>(true);
@@ -84,7 +82,6 @@ namespace BovineLabs.Spatial
             if (!mapSingleton.Map.Map.IsCreated) return;
 
             _targetsLookup.Update(ref state);
-            _customsLookup.Update(ref state);
             _sourcesLookup.Update(ref state);
             _linksLookup.Update(ref state);
             _transformLookup.Update(ref state);
@@ -103,7 +100,6 @@ namespace BovineLabs.Spatial
                 MapEntities = entitiesArray,
                 MaskDatabase = maskDatabase,
                 TargetsLookup = _targetsLookup,
-                CustomsLookup = _customsLookup,
                 SourcesLookup = _sourcesLookup,
                 LinksLookup = _linksLookup,
                 TransformLookup = _transformLookup,
@@ -170,7 +166,6 @@ namespace BovineLabs.Spatial
             [ReadOnly] public NativeArray<Entity> MapEntities;
             [ReadOnly] public SpatialMaskDatabase MaskDatabase;
             [ReadOnly] public ComponentLookup<Targets> TargetsLookup;
-            [ReadOnly] public ComponentLookup<TargetsCustom> CustomsLookup;
             [ReadOnly] public UnsafeComponentLookup<EntityLinkSource> SourcesLookup;
             [ReadOnly] public UnsafeBufferLookup<EntityLinkEntry> LinksLookup;
             [ReadOnly] public ComponentLookup<LocalToWorld> TransformLookup;
@@ -208,7 +203,7 @@ namespace BovineLabs.Spatial
                             : default;
 
                         if (TryResolveTarget(clipData.RouteTo, clipData.RouteLinkKey, binding.Value, target,
-                                targets, CustomsLookup, SourcesLookup, LinksLookup,
+                                targets, SourcesLookup, LinksLookup,
                                 out var resolved))
                             currentHits.Add(resolved);
                     } while (MapSingleton.Map.Map.TryGetNextValue(out item, ref it));
@@ -449,7 +444,7 @@ namespace BovineLabs.Spatial
         }
 
         private static bool TryResolveTarget(Target targetMode, ushort linkKey, Entity self, Entity other,
-            in Targets targets, in ComponentLookup<TargetsCustom> customLookup,
+            in Targets targets,
             in UnsafeComponentLookup<EntityLinkSource> sources, in UnsafeBufferLookup<EntityLinkEntry> links,
             out Entity resolved)
         {
@@ -461,8 +456,7 @@ namespace BovineLabs.Spatial
                 Target.Target => other,
                 Target.Owner => targets.Owner,
                 Target.Source => targets.Source,
-                Target.Custom0 => customLookup.TryGetComponent(self, out var custom) ? custom.Target0 : Entity.Null,
-                Target.Custom1 => customLookup.TryGetComponent(self, out var custom) ? custom.Target1 : Entity.Null,
+                Target.Custom => targets.Custom,
                 _ => Entity.Null
             };
 
